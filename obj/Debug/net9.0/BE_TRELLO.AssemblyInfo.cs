@@ -10,10 +10,11 @@
 using System;
 using System.Reflection;
 
+[assembly: Microsoft.Extensions.Configuration.UserSecrets.UserSecretsIdAttribute("1c19afc2-ffae-40dc-b1d8-a40a90096ee0")]
 [assembly: System.Reflection.AssemblyCompanyAttribute("BE_TRELLO")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+f5f7dcf5cdbae3fb5cb342958e2f2741a59fc111")]
 [assembly: System.Reflection.AssemblyProductAttribute("BE_TRELLO")]
 [assembly: System.Reflection.AssemblyTitleAttribute("BE_TRELLO")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

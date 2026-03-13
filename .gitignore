@@ -1,0 +1,42 @@
+/Migrations
+# ==========================================
+# 1. THƯ MỤC CHỨA FILE BIÊN DỊCH (RẤT NẶNG)
+# ==========================================
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+[Dd]ebug/
+[Rr]elease/
+
+# ==========================================
+# 2. FILE CẤU HÌNH CỦA CÔNG CỤ LẬP TRÌNH (IDE)
+# ==========================================
+# Visual Studio
+.vs/
+*.user
+*.userosscache
+*.sln.docstates
+*.suo
+
+# Visual Studio Code / Rider
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+.idea/
+
+# ==========================================
+# 3. CÁC FILE CHỨA THÔNG TIN NHẠY CẢM (BẢO MẬT)
+# ==========================================
+# Tuyệt đối không đẩy cấu hình môi trường Dev hoặc Secret lên
+appsettings.Development.json
+appsettings.Secret.json
+*.env
+secrets.json
+
+# ==========================================
+# 4. FILE RÁC CỦA HỆ ĐIỀU HÀNH
+# ==========================================
+.DS_Store
+Thumbs.db
