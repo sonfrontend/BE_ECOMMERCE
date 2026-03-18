@@ -25,17 +25,18 @@ builder.Services.AddControllers();
 
 // Nạp cấu hình Authentication
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-.AddJwtBearer(options =>{
-options.TokenValidationParameters = new TokenValidationParameters
+.AddJwtBearer(options =>
 {
-    ValidateIssuer = true,
-    ValidateAudience = true,
-    ValidateLifetime = true,
-    ValidateIssuerSigningKey = true,
-    ValidIssuer = jwtIssuer,
-    ValidAudience = jwtAudience,
-    IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey ?? throw new InvalidOperationException("Jwt:Key is missing!")))
-};
+    options.TokenValidationParameters = new TokenValidationParameters
+    {
+        ValidateIssuer = true,
+        ValidateAudience = true,
+        ValidateLifetime = true,
+        ValidateIssuerSigningKey = true,
+        ValidIssuer = jwtIssuer,
+        ValidAudience = jwtAudience,
+        IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey ?? throw new InvalidOperationException("Jwt:Key is missing!")))
+    };
 });
 
 
@@ -70,6 +71,19 @@ builder.Services.AddSwaggerGen(option =>
 });
 
 
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowReactApp", policy =>
+    {
+        // SOI KỸ CHỖ NÀY:
+        policy.WithOrigins("http://localhost:" + builder.Configuration["PORT:FE"]) // <--- CHUẨN
+        // policy.WithOrigins("http://localhost:5173/") <--- SAI (Có dấu gạch chéo ở cuối là vứt đi ngay)
+              .AllowAnyHeader()
+              .AllowAnyMethod();
+    });
+});
+
+
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
@@ -82,9 +96,13 @@ if (app.Environment.IsDevelopment())
 
 // app.UseHttpsRedirection();
 
+app.UseCors("AllowReactApp");
+
 app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
 
+// Ép app chạy ở cổng 5000
+app.Urls.Add("http://localhost:" + builder.Configuration["PORT:BE"]);
 app.Run();
