@@ -188,11 +188,18 @@ public class AuthController(ApplicationDbContext context, IConfiguration config)
 
             // 5. Cấp thẻ VIP (JWT) của riêng hệ thống cho người dùng này
             string accessToken = CreateToken(user);
+            string newRefreshToken = GenerateRefreshToken();
+
+            // Cập nhật vào DB
+            user.RefreshToken = newRefreshToken;
+            user.RefreshTokenExpiryTime = DateTime.Now.AddDays(7);
+            _ = await _context.SaveChangesAsync();
 
             // 6. Trả về cho React
             return Ok(new
             {
                 accessToken,
+                refreshToken = newRefreshToken,
                 userInfo = new
                 {
                     id = user.UserId,
