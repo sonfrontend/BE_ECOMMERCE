@@ -4,8 +4,8 @@ using System.Security.Cryptography; // Thêm thư viện này lên đầu file
 using System.Text;
 using System.Text.RegularExpressions;
 
-using BE_TRELLO.Data; // Thay bằng namespace AppDbContext của bạn
-using BE_TRELLO.Entities.Auth;
+using BE_ECOMMERCE.Data; // Thay bằng namespace AppDbContext của bạn
+using BE_ECOMMERCE.Entities.Auth;
 
 using Google.Apis.Auth;
 
@@ -14,7 +14,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.IdentityModel.Tokens;
 
 
-namespace BE_TRELLO.Controllers;
+namespace BE_ECOMMERCE.Controllers;
 
 [Route("api/[controller]")]
 [ApiController]
@@ -28,9 +28,22 @@ public class AuthController(ApplicationDbContext context, IConfiguration config)
     {
 
 
-        Users? user = _context.Users.FirstOrDefault(u => u.UserName == request.UserName);
-        bool isPasswordValid = BCrypt.Net.BCrypt.Verify(request.Password, user.PasswordHash);
-        if (user == null || !isPasswordValid)
+        bool isPasswordValid = false;
+        User? user = _context.Users.FirstOrDefault(u => u.UserName == request.UserName);
+        if (user == null)
+        {
+            return Unauthorized(new { message = "Tên đăng nhập hoặc mật khẩu không đúng!" });
+        }
+        else
+        {
+            if (string.IsNullOrEmpty(user.PasswordHash))
+            {
+                return Unauthorized(new { message = "Tài khoản này được đăng ký bằng Google, vui lòng đăng nhập bằng Google!" });
+            }
+            isPasswordValid = BCrypt.Net.BCrypt.Verify(request.Password, user.PasswordHash);
+        }
+
+        if (!isPasswordValid)
         {
             return Unauthorized(new { message = "Tên đăng nhập hoặc mật khẩu không đúng!" });
         }
@@ -40,7 +53,7 @@ public class AuthController(ApplicationDbContext context, IConfiguration config)
         string refreshToken = GenerateRefreshToken();
 
         user.RefreshToken = refreshToken;
-        user.RefreshTokenExpiryTime = DateTime.Now.AddDays(7);
+        user.RefreshTokenExpiryTime = DateTime.UtcNow.AddDays(7);
         _ = _context.SaveChanges();
 
         // 3. Trả về cho Swagger / React
@@ -63,9 +76,14 @@ public class AuthController(ApplicationDbContext context, IConfiguration config)
     [HttpPost("register")]
     public async Task<IActionResult> Register([FromBody] RegisterRequest request)
     {
-        // Kiểm tra xem Email đã tồn tại chưa... (bạn tự viết đoạn này nhé)
+        // Kiểm tra xem Email đã tồn tại chưa
+        bool isEmailExist = _context.Users.Any(u => u.Email == request.Email);
+        if (isEmailExist)
+        {
+            return BadRequest(new { message = "Email này đã được sử dụng!" });
+        }
 
-        Users? user = _context.Users.FirstOrDefault(u => u.UserName == request.UserName);
+        User? user = _context.Users.FirstOrDefault(u => u.UserName == request.UserName);
         if (user != null)
         {
             return BadRequest(new { message = "Tên đăng nhập đã tồn tại!" });
@@ -81,7 +99,7 @@ public class AuthController(ApplicationDbContext context, IConfiguration config)
         // Ví dụ user gõ "123456", biến này sẽ biến thành chuỗi: "$2a$11$Kk3/..."
         string hashedPassword = BCrypt.Net.BCrypt.HashPassword(request.Password);
 
-        Users newUser = new()
+        User newUser = new()
         {
             UserName = request.UserName,
             Email = request.Email,
@@ -99,9 +117,9 @@ public class AuthController(ApplicationDbContext context, IConfiguration config)
     [HttpPost("refresh-token")]
     public async Task<IActionResult> RefreshToken([FromBody] RefreshTokenRequest request)
     {
-        Users? user = _context.Users.FirstOrDefault(u => u.RefreshToken == request.RefreshToken);
+        User? user = _context.Users.FirstOrDefault(u => u.RefreshToken == request.RefreshToken);
 
-        if (user == null || user.RefreshTokenExpiryTime <= DateTime.Now)
+        if (user == null || user.RefreshTokenExpiryTime <= DateTime.UtcNow)
         {
             return Unauthorized(new { message = "Refresh Token không hợp lệ hoặc đã hết hạn!" });
         }
@@ -112,7 +130,7 @@ public class AuthController(ApplicationDbContext context, IConfiguration config)
 
         // Cập nhật vào DB
         user.RefreshToken = newRefreshToken;
-        user.RefreshTokenExpiryTime = DateTime.Now.AddDays(7);
+        user.RefreshTokenExpiryTime = DateTime.UtcNow.AddDays(7);
         _ = await _context.SaveChangesAsync();
 
         return Ok(new
@@ -168,12 +186,12 @@ public class AuthController(ApplicationDbContext context, IConfiguration config)
             GoogleJsonWebSignature.Payload payload = await GoogleJsonWebSignature.ValidateAsync(request.IdToken, settings);
 
             // 3. Nếu hàng chuẩn, móc Email ra và tìm xem người này từng vào hệ thống chưa
-            Users? user = _context.Users.FirstOrDefault(u => u.Email == payload.Email);
+            User? user = _context.Users.FirstOrDefault(u => u.Email == payload.Email);
 
             // 4. CHƯA CÓ TÀI KHOẢN? -> Tự động đăng ký luôn không cần hỏi!
             if (user == null)
             {
-                user = new Users // (Tên class model Users của bạn)
+                user = new User // (Tên class model Users của bạn)
                 {
                     // Tùy theo các cột trong DB của bạn mà điều chỉnh nhé
                     UserName = payload.Name, // Lấy luôn tên Google làm tên hiển thị
@@ -192,7 +210,7 @@ public class AuthController(ApplicationDbContext context, IConfiguration config)
 
             // Cập nhật vào DB
             user.RefreshToken = newRefreshToken;
-            user.RefreshTokenExpiryTime = DateTime.Now.AddDays(7);
+            user.RefreshTokenExpiryTime = DateTime.UtcNow.AddDays(7);
             _ = await _context.SaveChangesAsync();
 
             // 6. Trả về cho React
@@ -227,7 +245,7 @@ public class AuthController(ApplicationDbContext context, IConfiguration config)
         }
     }
 
-    private string CreateToken(Users user)
+    private string CreateToken(User user)
     {
         List<Claim> claims =
         [
@@ -243,7 +261,7 @@ public class AuthController(ApplicationDbContext context, IConfiguration config)
             issuer: _config["Jwt:Issuer"],
             audience: _config["Jwt:Audience"],
             claims: claims,
-            expires: DateTime.UtcNow.AddDays(1),
+            expires: DateTime.UtcNow.AddMinutes(60), // AccessToken thường chỉ nên để 30 - 60 phút
             signingCredentials: creds
         );
 

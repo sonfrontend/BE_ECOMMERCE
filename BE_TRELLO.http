@@ -1,6 +1,0 @@
-@BE_TRELLO_HostAddress = http://localhost:5207
-
-GET {{BE_TRELLO_HostAddress}}/weatherforecast/
-Accept: application/json
-
-###

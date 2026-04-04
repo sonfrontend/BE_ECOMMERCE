@@ -1,11 +1,11 @@
 using System.Security.Claims;
 
-using BE_TRELLO.Data;
+using BE_ECOMMERCE.Data;
 
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
-namespace BE_TRELLO.Controllers;
+namespace BE_ECOMMERCE.Controllers;
 
 
 [Route("api/[controller]")]
@@ -13,7 +13,7 @@ namespace BE_TRELLO.Controllers;
 internal class UserController(ApplicationDbContext context, IConfiguration config) : ControllerBase
 {
     private readonly ApplicationDbContext _context = context;
-    private readonly IConfiguration _config = config;
+    // private readonly IConfiguration _config = config;
 
     [HttpGet("profile")]
     [Authorize]
@@ -25,7 +25,7 @@ internal class UserController(ApplicationDbContext context, IConfiguration confi
             return Unauthorized();
         }
 
-        Entities.Auth.Users? user = await _context.Users.FindAsync(userId);
+        Entities.Auth.User? user = await _context.Users.FindAsync(Guid.Parse(userId));
         return user == null
             ? NotFound()
             : Ok(new

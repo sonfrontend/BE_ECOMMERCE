@@ -1,6 +1,6 @@
 using System.Text;
 
-using BE_TRELLO.Data;
+using BE_ECOMMERCE.Data;
 
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;

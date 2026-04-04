@@ -1,4 +1,4 @@
-namespace BE_TRELLO.Entities.Auth;
+namespace BE_ECOMMERCE.Entities.Auth;
 
 public class BaseEntity
 {
