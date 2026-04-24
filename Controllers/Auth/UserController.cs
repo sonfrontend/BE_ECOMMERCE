@@ -4,6 +4,8 @@ using System.Text.RegularExpressions;
 using BE_ECOMMERCE.Data;
 using BE_ECOMMERCE.DTOs.Users;
 
+using Microsoft.EntityFrameworkCore;
+
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
@@ -16,6 +18,34 @@ public class UserController(ApplicationDbContext context, IConfiguration config)
 {
     private readonly ApplicationDbContext _context = context;
     // private readonly IConfiguration _config = config;
+
+    [HttpGet]
+    [Authorize]
+    public async Task<IActionResult> GetAllUsers()
+    {
+        var users = await _context.Users
+            .Select(u => new {
+                u.UserId,
+                u.UserName,
+                u.FullName
+            })
+            .ToListAsync();
+        return Ok(users);
+    }
+
+    [HttpGet("userRole")]
+    [Authorize]
+    public async Task<IActionResult> GetAllUserRoles()
+    {
+        var userRoles = await _context.UserRoles
+            .Select(ur => new {
+                ur.UserRoleId,
+                ur.UserId,
+                ur.RoleId
+            })
+            .ToListAsync();
+        return Ok(userRoles);
+    }
 
     [HttpGet("profile")]
     [Authorize]
