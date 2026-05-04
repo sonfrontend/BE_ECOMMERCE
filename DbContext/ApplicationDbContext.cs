@@ -12,6 +12,7 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<Role> Roles { get; set; }
     public DbSet<Permission> Permissions { get; set; }
     public DbSet<RolePermission> RolePermissions { get; set; }
+    public DbSet<UserRole> UserRoles { get; set; }
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -76,14 +77,12 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
            _ = entity.Property(e => e.RoleId).IsRequired(true);
            _ = entity.Property(e => e.PermissionId).IsRequired(true);
 
-
-
            entity.HasOne(rp => rp.Role)
-          .WithMany(r => r.RolePermissions) // Nối tới ICollection<RolePermission> trong class Role
+          .WithMany(r => r.RolePermissions)
           .HasForeignKey(rp => rp.RoleId);
 
            entity.HasOne(rp => rp.Permission)
-          .WithMany(r => r.RolePermissions) // Nối tới ICollection<RolePermission> trong class Role
+          .WithMany(r => r.RolePermissions)
           .HasForeignKey(rp => rp.PermissionId);
            // Chống trùng key
            entity.HasIndex(rp => new { rp.RoleId, rp.PermissionId })
@@ -91,8 +90,27 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
 
        });
 
+        _ = builder.Entity<UserRole>(entity =>
+       {
+           _ = entity.HasKey(u => u.UserRoleId);
 
+           _ = entity.Property(u => u.UserRoleId)
+               .HasDefaultValueSql("NEWID()");
 
+           _ = entity.Property(e => e.UserId).IsRequired(true);
+           _ = entity.Property(e => e.RoleId).IsRequired(true);
 
+           entity.HasOne(ur => ur.User)
+          .WithMany(u => u.UserRoles)
+          .HasForeignKey(ur => ur.UserId);
+
+           entity.HasOne(ur => ur.Role)
+          .WithMany(r => r.UserRoles)
+          .HasForeignKey(ur => ur.RoleId);
+
+           // Chống trùng key
+           entity.HasIndex(ur => new { ur.UserId, ur.RoleId })
+         .IsUnique();
+       });
     }
 }

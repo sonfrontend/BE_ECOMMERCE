@@ -16,7 +16,6 @@ using Microsoft.IdentityModel.Tokens;
 
 
 namespace BE_ECOMMERCE.Controllers;
-
 [Route("api/[controller]")]
 [ApiController]
 public class AuthController(ApplicationDbContext context, IConfiguration config) : ControllerBase
