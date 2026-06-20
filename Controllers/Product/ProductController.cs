@@ -1,11 +1,12 @@
 using BE_ECOMMERCE.Data;
-
-using System.Net.Http;
-using System.Text;
-using System.Text.Json;
-using BE_ECOMMERCE.DTOs.Products;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Linq;
+using System.Threading.Tasks;
+using System.Net.Http;
+using System.Net.Http.Json;
+using System.Security.Claims;
+using Microsoft.AspNetCore.Authorization;
 
 namespace BE_ECOMMERCE.Controllers.Product;
 
@@ -16,624 +17,530 @@ public class ProductController(ApplicationDbContext context, IConfiguration conf
     private readonly ApplicationDbContext _context = context;
     private readonly IConfiguration _configuration = configuration;
 
-    [HttpGet]
-    public async Task<IActionResult> GetProducts(
-        [FromQuery] int page = 1,
-        [FromQuery] int pageSize = 20,
-        [FromQuery] string search = null,
-        [FromQuery] string sortPrice = null)
+    [HttpGet("ai-recommendations")]
+    public async Task<IActionResult> GetAIRecommendations()
     {
+        var userIdStr = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (string.IsNullOrEmpty(userIdStr))
+        {
+            // If not logged in, return fallback (best sellers)
+            return await GetFallbackRecommendations();
+        }
+
         try
         {
-            // 1. Khởi tạo câu lệnh truy vấn LINQ từ Database
-            var query = _context.Products.AsNoTracking().AsQueryable();
-
-            // Lọc dữ liệu theo từ khóa tìm kiếm (Text hoặc Voice đã dịch thành chữ)
-            if (!string.IsNullOrWhiteSpace(search))
+            var aiServiceUrl = _configuration["AiServiceUrl"] ?? "http://localhost:8000";
+            using var client = new HttpClient();
+            var response = await client.PostAsJsonAsync($"{aiServiceUrl}/api/recommend-cf", new
             {
-                string searchKeyword = search.Trim().ToLower();
-
-                // Lọc những sản phẩm có Tên hoặc Mô tả chứa từ khóa tìm kiếm
-                query = query.Where(p => p.ProductName.ToLower().Contains(searchKeyword));
-            }
-
-            // Kéo dữ liệu đã lọc từ DB lên bộ nhớ RAM
-            var rawProducts = await query.ToListAsync();
-
-            // 2. Gom nhóm theo ProductCode (Ví dụ: 0108775)
-            var groupedData = rawProducts
-                .GroupBy(p => p.ProductCode)
-                .Select(g =>
-                {
-                    // Chọn sản phẩm đầu tiên trong nhóm làm "Sản phẩm đại diện"
-                    var defaultProduct = g.FirstOrDefault();
-
-                    // Lọc ra các sản phẩm CÒN LẠI (bỏ qua cái đại diện) để đưa vào mảng con
-                    var otherVariants = g.Where(p => p.ArticleId != defaultProduct.ArticleId).ToList();
-
-                    return new
-                    {
-                        // --- THÔNG TIN CỦA SẢN PHẨM ĐẦU TIÊN ---
-                        ArticleId = defaultProduct.ArticleId,
-                        ProductCode = defaultProduct.ProductCode,
-                        CategoryId = defaultProduct.CategoryId,
-                        ProductName = defaultProduct.ProductName,
-                        Price = defaultProduct.Price,
-                        ImageUrl = defaultProduct.ImageUrl,
-                        Description = defaultProduct.Description,
-                        Size = defaultProduct.Size,     // Hiện rõ Size của cái đại diện
-                        Color = defaultProduct.Color,   // Hiện rõ Màu của cái đại diện
-                        StockQuantity = defaultProduct.StockQuantity,
-
-                        // --- MẢNG CHỨA CÁC SẢN PHẨM LIÊN QUAN CÒN LẠI ---
-                        Products = otherVariants.Select(v => new
-                        {
-                            ArticleId = v.ArticleId,
-                            Size = v.Size,
-                            Color = v.Color,
-                            StockQuantity = v.StockQuantity,
-                            Price = v.Price,
-                            ImageUrl = v.ImageUrl
-                        }).OrderBy(v => v.Size).ToList()
-                    };
-                })
-                .ToList();
-
-            // Sắp xếp theo giá hoặc mặc định
-            if (sortPrice == "asc")
-            {
-                groupedData = groupedData.OrderBy(p => p.Price).ToList();
-            }
-            else if (sortPrice == "desc")
-            {
-                groupedData = groupedData.OrderByDescending(p => p.Price).ToList();
-            }
-            else
-            {
-                groupedData = groupedData.OrderByDescending(p => p.ArticleId).ToList();
-            }
-
-            // 3. Xử lý phân trang
-            var totalCount = groupedData.Count;
-            var pagedProducts = groupedData
-                .Skip((page - 1) * pageSize)
-                .Take(pageSize)
-                .ToList();
-
-            var hasMore = (page * pageSize) < totalCount;
-
-            return Ok(new
-            {
-                data = pagedProducts,
-                hasMore = hasMore,
-                nextPage = hasMore ? page + 1 : (int?)null,
-                totalCount = totalCount
+                user_id = userIdStr,
+                top_k = 10
             });
-        }
-        catch (Exception ex)
-        {
-            return StatusCode(500, $"Lỗi hệ thống: {ex.Message}");
-        }
-    }
 
-    [HttpGet("{productCode}")]
-    public async Task<IActionResult> GetProductByCode(string productCode)
-    {
-        try
-        {
-            var variants = await _context.Products
-                .Include(p => p.Categories)
-                    .ThenInclude(c => c.ParentCategory)
-                .Where(p => p.ProductCode == productCode)
-                .AsNoTracking()
-                .ToListAsync();
-
-            if (!variants.Any())
+            if (response.IsSuccessStatusCode)
             {
-                return NotFound("Không tìm thấy sản phẩm");
-            }
-
-            var defaultProduct = variants.FirstOrDefault();
-
-            var otherVariants = variants.Where(p => p.ArticleId != defaultProduct.ArticleId).ToList();
-
-            var result = new
-            {
-                // --- THÔNG TIN CỦA SẢN PHẨM ĐẦU TIÊN ---
-                ArticleId = defaultProduct.ArticleId,
-                ProductCode = defaultProduct.ProductCode,
-                CategoryId = defaultProduct.CategoryId,
-                CategoryName = defaultProduct.Categories?.Name ?? "Danh mục chung",
-                ParentCategoryName = defaultProduct.Categories?.ParentCategory?.Name,
-                ProductName = defaultProduct.ProductName,
-                Price = defaultProduct.Price,
-                ImageUrl = defaultProduct.ImageUrl,
-                Description = defaultProduct.Description,
-                Size = defaultProduct.Size,
-                Color = defaultProduct.Color,
-                StockQuantity = defaultProduct.StockQuantity,
-
-                // --- MẢNG CHỨA CÁC SẢN PHẨM LIÊN QUAN CÒN LẠI ---
-                Products = otherVariants.Select(v => new
+                var recommendedIds = await response.Content.ReadFromJsonAsync<List<string>>();
+                if (recommendedIds != null && recommendedIds.Any())
                 {
-                    ArticleId = v.ArticleId,
-                    Size = v.Size,
-                    Color = v.Color,
-                    StockQuantity = v.StockQuantity,
-                    Price = v.Price,
-                    ImageUrl = v.ImageUrl
-                }).OrderBy(v => v.Size).ToList()
-            };
-
-            return Ok(result);
-        }
-        catch (Exception ex)
-        {
-            return StatusCode(500, $"Lỗi hệ thống: {ex.Message}");
-        }
-    }
-
-    [HttpGet("parent-category/{parentId}")]
-    public async Task<IActionResult> GetProductsByParentCategory(
-        int parentId,
-        [FromQuery] int page = 1,
-        [FromQuery] int pageSize = 20,
-        [FromQuery] string sortPrice = null)
-    {
-        try
-        {
-            var query = _context.Products
-                .Include(p => p.Categories)
-                .Where(p => p.Categories != null && p.Categories.ParentId == parentId)
-                .AsNoTracking();
-
-            var rawProducts = await query.ToListAsync();
-
-            var groupedData = rawProducts
-                .GroupBy(p => p.ProductCode)
-                .Select(g =>
-                {
-                    var defaultProduct = g.FirstOrDefault();
-                    var otherVariants = g.Where(p => p.ArticleId != defaultProduct.ArticleId).ToList();
-
-                    return new
-                    {
-                        ArticleId = defaultProduct.ArticleId,
-                        ProductCode = defaultProduct.ProductCode,
-                        CategoryId = defaultProduct.CategoryId,
-                        ProductName = defaultProduct.ProductName,
-                        Price = defaultProduct.Price,
-                        ImageUrl = defaultProduct.ImageUrl,
-                        Description = defaultProduct.Description,
-                        Size = defaultProduct.Size,
-                        Color = defaultProduct.Color,
-                        StockQuantity = defaultProduct.StockQuantity,
-
-                        Products = otherVariants.Select(v => new
+                    // Map IDs to actual product data
+                    var products = await _context.Products
+                        .Where(p => recommendedIds.Contains(p.ProductId))
+                        .Select(p => new
                         {
-                            ArticleId = v.ArticleId,
-                            Size = v.Size,
-                            Color = v.Color,
-                            StockQuantity = v.StockQuantity,
-                            Price = v.Price,
-                            ImageUrl = v.ImageUrl
-                        }).OrderBy(v => v.Size).ToList()
-                    };
-                })
-                .ToList();
+                            articleId = p.ProductId,
+                            productName = p.ProductName,
+                            price = (p.DiscountPercentage > 0 && (p.DiscountEndDate == null || p.DiscountEndDate >= DateTime.Now)) ? _context.ProductVariants.Where(v => v.ProductId == p.ProductId).Select(v => v.CurrentPrice).FirstOrDefault() : _context.ProductVariants.Where(v => v.ProductId == p.ProductId).Select(v => v.OriginalPrice).FirstOrDefault(),
+                            originalPrice = _context.ProductVariants.Where(v => v.ProductId == p.ProductId).Select(v => v.OriginalPrice).FirstOrDefault(),
+                            discountPercentage = (p.DiscountPercentage > 0 && (p.DiscountEndDate == null || p.DiscountEndDate >= DateTime.Now)) ? p.DiscountPercentage : 0,
+                            imageUrl = p.ImageUrl
+                        })
+                        .ToListAsync();
 
-            if (sortPrice == "asc")
-            {
-                groupedData = groupedData.OrderBy(p => p.Price).ToList();
+                    // Maintain the order returned by AI
+                    var sortedProducts = recommendedIds
+                        .Select(id => products.FirstOrDefault(p => p.articleId == id))
+                        .Where(p => p != null)
+                        .ToList();
+
+                    return Ok(sortedProducts);
+                }
             }
-            else if (sortPrice == "desc")
-            {
-                groupedData = groupedData.OrderByDescending(p => p.Price).ToList();
-            }
-            else
-            {
-                groupedData = groupedData.OrderByDescending(p => p.ArticleId).ToList();
-            }
-
-            var totalCount = groupedData.Count;
-            var pagedProducts = groupedData
-                .Skip((page - 1) * pageSize)
-                .Take(pageSize)
-                .ToList();
-
-            var hasMore = (page * pageSize) < totalCount;
-
-            return Ok(new
-            {
-                data = pagedProducts,
-                hasMore = hasMore,
-                nextPage = hasMore ? page + 1 : (int?)null,
-                totalCount = totalCount
-            });
         }
         catch (Exception ex)
         {
-            return StatusCode(500, $"Lỗi hệ thống: {ex.Message}");
+            Console.WriteLine($"Error calling AI service: {ex.Message}");
         }
+
+        return await GetFallbackRecommendations();
     }
 
-    // TÁCH RIÊNG API TÌM KIẾM
-    // Đường dẫn: GET /api/Product/search?q={từ_khóa}&page=1&pageSize=15
-    [HttpGet("search")]
-    public async Task<IActionResult> SearchProducts([FromQuery] string? q, [FromQuery] int page = 1, [FromQuery] int pageSize = 15)
+    [HttpGet("{id}/frequently-bought-together")]
+    public async Task<IActionResult> GetFrequentlyBoughtTogether(string id)
     {
-        var queryable = _context.Products.AsQueryable();
-
-        // 1. Lọc theo từ khóa (Nếu khách có gõ chữ)
-        if (!string.IsNullOrWhiteSpace(q))
-        {
-            queryable = queryable.Where(p => p.ProductName.Contains(q));
-        }
-
-        // 2. Đếm tổng số kết quả
-        int totalItems = await queryable.CountAsync();
-
-        // 3. Phân trang
-        var products = await queryable
-            .Skip((page - 1) * pageSize)
-            .Take(pageSize)
-            .Select(p => new
-            {
-                p.ArticleId,
-                p.ProductCode,
-                p.ProductName,
-                p.Price,
-                p.ImageUrl
-            })
-            .ToListAsync();
-
-        bool hasMore = (page * pageSize) < totalItems;
-
-        return Ok(new
-        {
-            data = products,
-            hasMore = hasMore,
-            total = totalItems
-        });
-    }
-
-    [HttpPost("search-by-image")]
-    public async Task<IActionResult> SearchByImage(IFormFile image)
-    {
-        if (image == null || image.Length == 0)
-        {
-            return BadRequest("Vui lòng chọn hình ảnh.");
-        }
-
         try
         {
-            var aiServiceUrl = _configuration["AiServiceUrl"];
-            if (string.IsNullOrEmpty(aiServiceUrl))
+            var aiServiceUrl = _configuration["AiServiceUrl"] ?? "http://localhost:8000";
+            using var client = new HttpClient();
+            var response = await client.PostAsJsonAsync($"{aiServiceUrl}/api/recommend-fbt", new
             {
-                return StatusCode(500, "Chưa cấu hình AiServiceUrl.");
-            }
+                product_id = id,
+                top_k = 5
+            });
 
-            using var httpClient = new HttpClient();
-            using var content = new MultipartFormDataContent();
-            
-            // Đọc file ảnh từ request
-            using var stream = image.OpenReadStream();
-            using var streamContent = new StreamContent(stream);
-            streamContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(image.ContentType);
-            
-            content.Add(streamContent, "image", image.FileName);
-
-            // Gọi API Python
-            var response = await httpClient.PostAsync($"{aiServiceUrl}/api/predict", content);
-            
-            if (!response.IsSuccessStatusCode)
+            if (response.IsSuccessStatusCode)
             {
-                var errorMsg = await response.Content.ReadAsStringAsync();
-                return StatusCode((int)response.StatusCode, $"Lỗi từ AI Service: {errorMsg}");
+                var recommendedIds = await response.Content.ReadFromJsonAsync<List<string>>();
+                if (recommendedIds != null && recommendedIds.Any())
+                {
+                    // Map IDs to actual product data
+                    var products = await _context.Products
+                        .Where(p => recommendedIds.Contains(p.ProductId))
+                        .Select(p => new
+                        {
+                            articleId = p.ProductId,
+                            productId = p.ProductId,
+                            productName = p.ProductName,
+                            price = (p.DiscountPercentage > 0 && (p.DiscountEndDate == null || p.DiscountEndDate >= DateTime.Now)) ? _context.ProductVariants.Where(v => v.ProductId == p.ProductId).Select(v => v.CurrentPrice).FirstOrDefault() : _context.ProductVariants.Where(v => v.ProductId == p.ProductId).Select(v => v.OriginalPrice).FirstOrDefault(),
+                            originalPrice = _context.ProductVariants.Where(v => v.ProductId == p.ProductId).Select(v => v.OriginalPrice).FirstOrDefault(),
+                            discountPercentage = (p.DiscountPercentage > 0 && (p.DiscountEndDate == null || p.DiscountEndDate >= DateTime.Now)) ? p.DiscountPercentage : 0,
+                            imageUrl = p.ImageUrl
+                        })
+                        .ToListAsync();
+
+                    // Maintain the order returned by AI
+                    var sortedProducts = recommendedIds
+                        .Select(rId => products.FirstOrDefault(p => p.productId == rId))
+                        .Where(p => p != null)
+                        .ToList();
+
+                    return Ok(sortedProducts);
+                }
             }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error calling AI FBT service: {ex.Message}");
+        }
 
-            // Nhận danh sách ArticleId từ Python
-            var articleIds = await response.Content.ReadFromJsonAsync<List<string>>();
+        return Ok(new List<object>()); // Return empty list on failure
+    }
 
-            if (articleIds == null || !articleIds.Any())
+    public class TrackProductViewRequest
+    {
+        public int DurationInSeconds { get; set; }
+    }
+
+    [HttpPost("{id}/track-view")]
+    [Authorize]
+    public async Task<IActionResult> TrackProductView(string id, [FromBody] TrackProductViewRequest request)
+    {
+        var userIdStr = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (string.IsNullOrEmpty(userIdStr) || !Guid.TryParse(userIdStr, out var userId))
+        {
+            return Unauthorized();
+        }
+
+        if (request.DurationInSeconds >= 5)
+        {
+            // Kiểm tra xem đã track interaction này gần đây chưa để tránh spam
+            var recentInteraction = await _context.UserInteractions
+                .Where(i => i.UserId == userId && i.ProductId == id && i.InteractionType == "VIEW" && i.CreatedAt >= DateTime.UtcNow.AddMinutes(-30))
+                .FirstOrDefaultAsync();
+
+            if (recentInteraction == null)
+            {
+                var interaction = new BE_ECOMMERCE.Entities.UserInteraction
+                {
+                    UserId = userId,
+                    ProductId = id,
+                    InteractionType = "VIEW",
+                    Score = 1,
+                    CreatedAt = DateTime.UtcNow
+                };
+
+                _context.UserInteractions.Add(interaction);
+                await _context.SaveChangesAsync();
+            }
+        }
+
+        return Ok(new { message = "Interaction tracked" });
+    }
+
+    public class ByIdsRequest
+    {
+        public List<string> ArticleIds { get; set; } = new List<string>();
+        public string? SortPrice { get; set; }
+    }
+
+    [HttpPost("by-ids")]
+    public async Task<IActionResult> GetProductsByIds([FromBody] ByIdsRequest request)
+    {
+        try
+        {
+            if (request.ArticleIds == null || !request.ArticleIds.Any())
             {
                 return Ok(new { data = new List<object>() });
             }
 
-            // 1. Tìm các ProductCode tương ứng với ArticleId do AI trả về
-            var aiProducts = await _context.Products
-                .Where(p => articleIds.Contains(p.ArticleId))
-                .Select(p => new { p.ArticleId, p.ProductCode })
-                .ToListAsync();
-
-            var productCodes = aiProducts.Select(p => p.ProductCode).Distinct().ToList();
-
-            // 2. Lấy TẤT CẢ các biến thể của những ProductCode này (để hiển thị đủ size/màu)
-            var rawProducts = await _context.Products
-                .Where(p => productCodes.Contains(p.ProductCode))
-                .ToListAsync();
-
-            // 3. Gom nhóm theo ProductCode giống như API GetProducts
-            var groupedData = rawProducts
-                .GroupBy(p => p.ProductCode)
-                .Select(g =>
-                {
-                    // Chọn sản phẩm đại diện: Là sản phẩm có độ tương đồng AI cao nhất (nằm ở đầu list articleIds)
-                    var defaultProduct = g.OrderBy(p => 
-                    {
-                        var idx = articleIds.IndexOf(p.ArticleId);
-                        return idx == -1 ? int.MaxValue : idx;
-                    }).First();
-
-                    var otherVariants = g.Where(p => p.ArticleId != defaultProduct.ArticleId).ToList();
-
-                    return new
-                    {
-                        ArticleId = defaultProduct.ArticleId,
-                        ProductCode = defaultProduct.ProductCode,
-                        CategoryId = defaultProduct.CategoryId,
-                        ProductName = defaultProduct.ProductName,
-                        Price = defaultProduct.Price,
-                        ImageUrl = defaultProduct.ImageUrl,
-                        Description = defaultProduct.Description,
-                        Size = defaultProduct.Size,
-                        Color = defaultProduct.Color,
-                        StockQuantity = defaultProduct.StockQuantity,
-
-                        Products = otherVariants.Select(v => new
-                        {
-                            ArticleId = v.ArticleId,
-                            Size = v.Size,
-                            Color = v.Color,
-                            StockQuantity = v.StockQuantity,
-                            Price = v.Price,
-                            ImageUrl = v.ImageUrl
-                        }).OrderBy(v => v.Size).ToList()
-                    };
-                })
-                // Sắp xếp các nhóm dựa trên thứ tự trả về từ AI
-                .OrderBy(g => 
-                {
-                    var idx = articleIds.IndexOf(g.ArticleId);
-                    return idx == -1 ? int.MaxValue : idx;
-                })
-                .ToList();
-
-            return Ok(new
-            {
-                data = groupedData,
-                total = groupedData.Count
-            });
-        }
-        catch (Exception ex)
-        {
-            return StatusCode(500, $"Lỗi hệ thống: {ex.Message}");
-        }
-    }
-
-    [HttpPost("recommendations")]
-    public async Task<IActionResult> GetRecommendations([FromBody] RecommendRequestDto request)
-    {
-        try
-        {
-            if (request == null || request.ArticleIds == null || !request.ArticleIds.Any())
-            {
-                // Fallback: Nếu không có lịch sử, lấy random 15 sản phẩm
-                var randomProducts = await _context.Products
-                    .OrderBy(r => Guid.NewGuid())
-                    .Take(request.TopK)
-                    .ToListAsync();
-                    
-                var fallbackData = randomProducts
-                    .GroupBy(p => p.ProductCode)
-                    .Select(g => 
-                    {
-                        var defaultProduct = g.First();
-                        var otherVariants = g.Where(p => p.ArticleId != defaultProduct.ArticleId).ToList();
-
-                        return new
-                        {
-                            ArticleId = defaultProduct.ArticleId,
-                            ProductCode = defaultProduct.ProductCode,
-                            CategoryId = defaultProduct.CategoryId,
-                            ProductName = defaultProduct.ProductName,
-                            Price = defaultProduct.Price,
-                            ImageUrl = defaultProduct.ImageUrl,
-                            Description = defaultProduct.Description,
-                            Size = defaultProduct.Size,
-                            Color = defaultProduct.Color,
-                            StockQuantity = defaultProduct.StockQuantity,
-                            Products = otherVariants.Select(v => new
-                            {
-                                ArticleId = v.ArticleId,
-                                Size = v.Size,
-                                Color = v.Color,
-                                StockQuantity = v.StockQuantity,
-                                Price = v.Price,
-                                ImageUrl = v.ImageUrl
-                            }).OrderBy(v => v.Size).ToList()
-                        };
-                    })
-                    .ToList();
-                
-                return Ok(new { data = fallbackData, total = fallbackData.Count });
-            }
-
-            // Gọi sang Python AI
-            using (var httpClient = new HttpClient())
-            {
-                var payload = new
-                {
-                    article_ids = request.ArticleIds,
-                    top_k = request.TopK
-                };
-
-                var content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
-                var response = await httpClient.PostAsync("http://localhost:8000/api/recommend-by-history", content);
-
-                if (!response.IsSuccessStatusCode)
-                {
-                    return StatusCode((int)response.StatusCode, "Lỗi từ AI Server");
-                }
-
-                var responseString = await response.Content.ReadAsStringAsync();
-                var recommendedArticleIds = JsonSerializer.Deserialize<List<string>>(responseString);
-
-                if (recommendedArticleIds == null || !recommendedArticleIds.Any())
-                {
-                    return Ok(new { data = new List<object>(), total = 0 });
-                }
-
-                var aiProducts = await _context.Products
-                    .Where(p => recommendedArticleIds.Contains(p.ArticleId))
-                    .Select(p => new { p.ArticleId, p.ProductCode })
-                    .ToListAsync();
-
-                var productCodes = aiProducts.Select(p => p.ProductCode).Distinct().ToList();
-
-                var rawProducts = await _context.Products
-                    .Where(p => productCodes.Contains(p.ProductCode))
-                    .ToListAsync();
-
-                var groupedData = rawProducts
-                    .GroupBy(p => p.ProductCode)
-                    .Select(g =>
-                    {
-                        var defaultProduct = g.OrderBy(p => 
-                        {
-                            var idx = recommendedArticleIds.IndexOf(p.ArticleId);
-                            return idx == -1 ? int.MaxValue : idx;
-                        }).First();
-
-                        var otherVariants = g.Where(p => p.ArticleId != defaultProduct.ArticleId).ToList();
-
-                        return new
-                        {
-                            ArticleId = defaultProduct.ArticleId,
-                            ProductCode = defaultProduct.ProductCode,
-                            CategoryId = defaultProduct.CategoryId,
-                            ProductName = defaultProduct.ProductName,
-                            Price = defaultProduct.Price,
-                            ImageUrl = defaultProduct.ImageUrl,
-                            Description = defaultProduct.Description,
-                            Size = defaultProduct.Size,
-                            Color = defaultProduct.Color,
-                            StockQuantity = defaultProduct.StockQuantity,
-
-                            Products = otherVariants.Select(v => new
-                            {
-                                ArticleId = v.ArticleId,
-                                Size = v.Size,
-                                Color = v.Color,
-                                StockQuantity = v.StockQuantity,
-                                Price = v.Price,
-                                ImageUrl = v.ImageUrl
-                            }).OrderBy(v => v.Size).ToList()
-                        };
-                    })
-                    .OrderBy(g => 
-                    {
-                        var idx = recommendedArticleIds.IndexOf(g.ArticleId);
-                        return idx == -1 ? int.MaxValue : idx;
-                    })
-                    .ToList();
-
-                return Ok(new
-                {
-                    data = groupedData,
-                    total = groupedData.Count
-                });
-            }
-        }
-        catch (Exception ex)
-        {
-            return StatusCode(500, $"Lỗi hệ thống: {ex.Message}");
-        }
-    }
-
-    [HttpPost("by-ids")]
-    public async Task<IActionResult> GetProductsByIds([FromBody] GetByIdsRequestDto request)
-    {
-        try
-        {
-            if (request == null || request.ArticleIds == null || !request.ArticleIds.Any())
-            {
-                return Ok(new { data = new List<object>(), total = 0 });
-            }
-
-            var aiProducts = await _context.Products
-                .Where(p => request.ArticleIds.Contains(p.ArticleId))
-                .Select(p => new { p.ArticleId, p.ProductCode })
-                .ToListAsync();
-
-            var productCodes = aiProducts.Select(p => p.ProductCode).Distinct().ToList();
-
-            var rawProducts = await _context.Products
-                .Where(p => productCodes.Contains(p.ProductCode))
-                .ToListAsync();
-
-            var groupedData = rawProducts
-                .GroupBy(p => p.ProductCode)
-                .Select(g =>
-                {
-                    var defaultProduct = g.OrderBy(p => 
-                    {
-                        var idx = request.ArticleIds.IndexOf(p.ArticleId);
-                        return idx == -1 ? int.MaxValue : idx;
-                    }).First();
-
-                    var otherVariants = g.Where(p => p.ArticleId != defaultProduct.ArticleId).ToList();
-
-                    return new
-                    {
-                        ArticleId = defaultProduct.ArticleId,
-                        ProductCode = defaultProduct.ProductCode,
-                        CategoryId = defaultProduct.CategoryId,
-                        ProductName = defaultProduct.ProductName,
-                        Price = defaultProduct.Price,
-                        ImageUrl = defaultProduct.ImageUrl,
-                        Description = defaultProduct.Description,
-                        Size = defaultProduct.Size,
-                        Color = defaultProduct.Color,
-                        StockQuantity = defaultProduct.StockQuantity,
-
-                        Products = otherVariants.Select(v => new
-                        {
-                            ArticleId = v.ArticleId,
-                            Size = v.Size,
-                            Color = v.Color,
-                            StockQuantity = v.StockQuantity,
-                            Price = v.Price,
-                            ImageUrl = v.ImageUrl
-                        }).OrderBy(v => v.Size).ToList()
-                    };
-                })
-                .ToList();
+            var query = _context.Products
+                .Include(p => p.ProductVariants)
+                .Where(p => request.ArticleIds.Contains(p.ProductId));
 
             if (request.SortPrice == "asc")
             {
-                groupedData = groupedData.OrderBy(p => p.Price).ToList();
+                query = query.OrderBy(p => p.ProductVariants.FirstOrDefault() != null ? p.ProductVariants.FirstOrDefault().CurrentPrice : 0);
             }
             else if (request.SortPrice == "desc")
             {
-                groupedData = groupedData.OrderByDescending(p => p.Price).ToList();
+                query = query.OrderByDescending(p => p.ProductVariants.FirstOrDefault() != null ? p.ProductVariants.FirstOrDefault().CurrentPrice : 0);
             }
-            else
+
+            var products = await query.Select(p => new
             {
-                groupedData = groupedData.OrderBy(g => 
-                {
-                    var idx = request.ArticleIds.IndexOf(g.ArticleId);
-                    return idx == -1 ? int.MaxValue : idx;
-                }).ToList();
-            }
+                articleId = p.ProductId,
+                productCode = p.ProductId,
+                productName = p.ProductName,
+                price = (p.DiscountPercentage > 0 && (p.DiscountEndDate == null || p.DiscountEndDate >= DateTime.Now)) ? (p.ProductVariants.FirstOrDefault() != null ? p.ProductVariants.FirstOrDefault().CurrentPrice : 0) : (p.ProductVariants.FirstOrDefault() != null ? p.ProductVariants.FirstOrDefault().OriginalPrice : 0),
+                originalPrice = p.ProductVariants.FirstOrDefault() != null ? p.ProductVariants.FirstOrDefault().OriginalPrice : 0,
+                discountPercentage = (p.DiscountPercentage > 0 && (p.DiscountEndDate == null || p.DiscountEndDate >= DateTime.Now)) ? p.DiscountPercentage : 0,
+                imageUrl = string.IsNullOrEmpty(p.ImageUrl) ? (p.ProductVariants.FirstOrDefault() != null ? p.ProductVariants.FirstOrDefault().ImageUrl : "") : p.ImageUrl,
+                soldQuantity = p.SoldQuantity
+            }).ToListAsync();
+
+            return Ok(new { data = products });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, $"Lỗi hệ thống: {ex.Message}");
+        }
+    }
+
+    private async Task<IActionResult> GetFallbackRecommendations()
+    {
+        var products = await _context.Products
+            .OrderByDescending(p => p.SoldQuantity) // Fallback: Best sellers
+            .Take(10)
+            .Select(p => new
+            {
+                articleId = p.ProductId,
+                productName = p.ProductName,
+                price = (p.DiscountPercentage > 0 && (p.DiscountEndDate == null || p.DiscountEndDate >= DateTime.Now)) ? _context.ProductVariants.Where(v => v.ProductId == p.ProductId).Select(v => v.CurrentPrice).FirstOrDefault() : _context.ProductVariants.Where(v => v.ProductId == p.ProductId).Select(v => v.OriginalPrice).FirstOrDefault(),
+                originalPrice = _context.ProductVariants.Where(v => v.ProductId == p.ProductId).Select(v => v.OriginalPrice).FirstOrDefault(),
+                discountPercentage = (p.DiscountPercentage > 0 && (p.DiscountEndDate == null || p.DiscountEndDate >= DateTime.Now)) ? p.DiscountPercentage : 0,
+                imageUrl = p.ImageUrl
+            })
+            .ToListAsync();
+        return Ok(products);
+    }
+
+    [HttpGet("{id}")]
+    public async Task<IActionResult> GetProductDetail(string id)
+    {
+        try
+        {
+            var product = await _context.Products
+                .Include(p => p.Categories)
+                .Include(p => p.ProductVariants)
+                .FirstOrDefaultAsync(p => p.ProductId == id);
+
+            if (product == null)
+                return NotFound("Sản phẩm không tồn tại");
+
+            var firstVariant = product.ProductVariants.FirstOrDefault();
+
+            bool isDiscountActive = product.DiscountPercentage > 0 && (product.DiscountEndDate == null || product.DiscountEndDate >= DateTime.Now);
 
             return Ok(new
             {
-                data = groupedData,
-                total = groupedData.Count
+                articleId = product.ProductId,
+                productCode = product.ProductId,
+                categoryId = product.CategoryId,
+                categoryName = product.Categories?.Name,
+                parentCategoryName = product.Categories?.ParentId != null ? _context.Categories.FirstOrDefault(c => c.Id == product.Categories.ParentId)?.Name : null,
+                productName = product.ProductName,
+                price = isDiscountActive && firstVariant != null ? firstVariant.CurrentPrice : (firstVariant != null ? firstVariant.OriginalPrice : 0),
+                originalPrice = firstVariant != null ? firstVariant.OriginalPrice : 0,
+                discountPercentage = isDiscountActive ? product.DiscountPercentage : 0,
+                discountStartDate = product.DiscountStartDate,
+                discountEndDate = product.DiscountEndDate,
+                favoriteCount = _context.Favorites.Count(f => f.ProductId == product.ProductId),
+                imageUrl = product.ImageUrl,
+                description = product.Description,
+                size = firstVariant?.Size,
+                color = firstVariant?.Color,
+                stockQuantity = firstVariant != null ? firstVariant.StockQuantity : 0,
+                products = product.ProductVariants.Select(v => new
+                {
+                    articleId = product.ProductId,
+                    variantId = v.VariantId,
+                    size = v.Size,
+                    color = v.Color,
+                    stockQuantity = v.StockQuantity,
+                    price = v.CurrentPrice,
+                    originalPrice = v.OriginalPrice,
+                    imageUrl = v.ImageUrl
+                }).ToList()
             });
         }
-        catch (Exception ex)
+        catch (System.Exception ex)
+        {
+            return StatusCode(500, $"Lỗi hệ thống: {ex.Message}");
+        }
+    }
+
+    [HttpGet("flash-sale")]
+    public async Task<IActionResult> GetFlashSaleProducts([FromQuery] int page = 1, [FromQuery] int pageSize = 12)
+    {
+        try
+        {
+            var query = _context.Products
+                .Include(p => p.ProductVariants)
+                .Where(p => p.IsActived && p.DiscountPercentage >= 15);
+
+            var totalCount = await query.CountAsync();
+
+            var flashSaleProducts = await query
+                .OrderByDescending(p => p.DiscountPercentage)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .Select(p => new
+                {
+                    p.ProductId,
+                    p.ProductName,
+                    ImageUrl = string.IsNullOrEmpty(p.ImageUrl) ? (p.ProductVariants.FirstOrDefault() != null ? p.ProductVariants.FirstOrDefault().ImageUrl : "") : p.ImageUrl,
+                    DiscountPercentage = (p.DiscountPercentage > 0 && (p.DiscountEndDate == null || p.DiscountEndDate >= DateTime.Now)) ? p.DiscountPercentage : 0,
+                    OriginalPrice = p.ProductVariants.FirstOrDefault() != null ? p.ProductVariants.FirstOrDefault().OriginalPrice : 0,
+                    CurrentPrice = (p.DiscountPercentage > 0 && (p.DiscountEndDate == null || p.DiscountEndDate >= DateTime.Now)) ? (p.ProductVariants.FirstOrDefault() != null ? p.ProductVariants.FirstOrDefault().CurrentPrice : 0) : (p.ProductVariants.FirstOrDefault() != null ? p.ProductVariants.FirstOrDefault().OriginalPrice : 0),
+                    SoldQuantity = p.SoldQuantity,
+                    StockQuantity = p.ProductVariants.Sum(v => v.StockQuantity)
+                })
+                .ToListAsync();
+
+            return Ok(new
+            {
+                TotalItems = totalCount,
+                TotalPages = (int)System.Math.Ceiling(totalCount / (double)pageSize),
+                Page = page,
+                PageSize = pageSize,
+                Items = flashSaleProducts
+            });
+        }
+        catch (System.Exception ex)
+        {
+            return StatusCode(500, $"Lỗi hệ thống: {ex.Message}");
+        }
+    }
+
+    [HttpGet]
+    public async Task<IActionResult> GetProducts([FromQuery] int? categoryId, [FromQuery] string keyword, [FromQuery] string sortBy, [FromQuery] string? sortPrice, [FromQuery] bool? isFlashSale, [FromQuery] bool? isFavorite, [FromQuery] int page = 1, [FromQuery] int pageSize = 12)
+    {
+        try
+        {
+            var query = _context.Products
+                .Include(p => p.ProductVariants)
+                .Where(p => p.IsActived);
+
+            if (isFavorite == true)
+            {
+                var userIdStr = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (!string.IsNullOrEmpty(userIdStr) && Guid.TryParse(userIdStr, out Guid userId))
+                {
+                    query = query.Where(p => _context.Favorites.Any(f => f.ProductId == p.ProductId && f.UserId == userId));
+                }
+                else
+                {
+                    // Nếu chưa đăng nhập mà đòi xem yêu thích thì trả về rỗng luôn
+                    query = query.Where(p => false);
+                }
+            }
+
+            if (isFlashSale == true)
+            {
+                query = query.Where(p => p.DiscountPercentage >= 15);
+            }
+
+            if (!string.IsNullOrEmpty(keyword))
+            {
+                query = query.Where(p => p.ProductName.Contains(keyword) || (p.Description != null && p.Description.Contains(keyword)));
+            }
+
+            if (categoryId.HasValue)
+            {
+                // Lấy ID của danh mục này và tất cả các danh mục con của nó
+                var categoryIds = new System.Collections.Generic.List<int> { categoryId.Value };
+                
+                // Cấp 2
+                var subCategoryIds = await _context.Categories
+                    .Where(c => c.ParentId == categoryId.Value)
+                    .Select(c => c.Id)
+                    .ToListAsync();
+                categoryIds.AddRange(subCategoryIds);
+                
+                // Cấp 3 (leaf)
+                if (subCategoryIds.Any()) {
+                     var leafIds = await _context.Categories
+                        .Where(c => c.ParentId != null && subCategoryIds.Contains(c.ParentId.Value))
+                        .Select(c => c.Id)
+                        .ToListAsync();
+                     categoryIds.AddRange(leafIds);
+                }
+
+                query = query.Where(p => p.CategoryId.HasValue && categoryIds.Contains(p.CategoryId.Value));
+            }
+
+            var totalCount = await query.CountAsync();
+
+            // Sắp xếp theo Type (Mới nhất, Bán chạy)
+            if (sortBy == "best_selling")
+            {
+                query = query.OrderByDescending(p => p.SoldQuantity);
+            }
+            else
+            {
+                if (isFlashSale == true)
+                {
+                    query = query.OrderByDescending(p => p.DiscountPercentage);
+                }
+                else 
+                {
+                    query = query.OrderByDescending(p => p.CreatedAt);
+                }
+            }
+
+            // Ghi đè bằng Giá nếu có chọn Giá
+            // "Mới nhất, bán chạy, yêu thích có thể đi cùng với price"
+            // Khi đi cùng với price, price sẽ là ưu tiên sắp xếp chính trên danh sách đã lọc (nếu là yêu thích)
+            // hoặc sắp xếp đè lên nếu là best_selling/new (vì ta order by giá).
+            if (sortPrice == "ins")
+            {
+                // Để thay thế OrderBy trước đó, ta phải dùng OrderBy
+                query = query.OrderBy(p => p.ProductVariants.FirstOrDefault() != null ? p.ProductVariants.FirstOrDefault().CurrentPrice : 0);
+            }
+            else if (sortPrice == "des")
+            {
+                query = query.OrderByDescending(p => p.ProductVariants.FirstOrDefault() != null ? p.ProductVariants.FirstOrDefault().CurrentPrice : 0);
+            }
+
+            var products = await query
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .Select(p => new
+                {
+                    p.ProductId,
+                    p.ProductName,
+                    ImageUrl = string.IsNullOrEmpty(p.ImageUrl) ? (p.ProductVariants.FirstOrDefault() != null ? p.ProductVariants.FirstOrDefault().ImageUrl : "") : p.ImageUrl,
+                    DiscountPercentage = (p.DiscountPercentage > 0 && (p.DiscountEndDate == null || p.DiscountEndDate >= DateTime.Now)) ? p.DiscountPercentage : 0,
+                    OriginalPrice = p.ProductVariants.FirstOrDefault() != null ? p.ProductVariants.FirstOrDefault().OriginalPrice : 0,
+                    CurrentPrice = (p.DiscountPercentage > 0 && (p.DiscountEndDate == null || p.DiscountEndDate >= DateTime.Now)) ? (p.ProductVariants.FirstOrDefault() != null ? p.ProductVariants.FirstOrDefault().CurrentPrice : 0) : (p.ProductVariants.FirstOrDefault() != null ? p.ProductVariants.FirstOrDefault().OriginalPrice : 0),
+                    SoldQuantity = p.SoldQuantity,
+                    StockQuantity = p.ProductVariants.Sum(v => v.StockQuantity)
+                })
+                .ToListAsync();
+
+            return Ok(new
+            {
+                TotalItems = totalCount,
+                TotalPages = (int)System.Math.Ceiling(totalCount / (double)pageSize),
+                Page = page,
+                PageSize = pageSize,
+                Items = products
+            });
+        }
+        catch (System.Exception ex)
+        {
+            return StatusCode(500, $"Lỗi hệ thống: {ex.Message}");
+        }
+    }
+
+    [HttpGet("variants")]
+    public async Task<IActionResult> GetProductVariants([FromQuery] string productId)
+    {
+        try
+        {
+            var query = _context.Set<BE_ECOMMERCE.Entities.Product.ProductVariant>().AsQueryable();
+            
+            if (!string.IsNullOrEmpty(productId))
+            {
+                query = query.Where(v => v.ProductId == productId);
+            }
+
+            var variants = await query
+                .Select(v => new
+                {
+                    v.VariantId,
+                    v.ProductId,
+                    v.Color,
+                    v.Size,
+                    v.OriginalPrice,
+                    v.CurrentPrice,
+                    v.StockQuantity,
+                    v.ImageUrl
+                })
+                .ToListAsync();
+
+            return Ok(variants);
+        }
+        catch (System.Exception ex)
+        {
+            return StatusCode(500, $"Lỗi hệ thống: {ex.Message}");
+        }
+    }
+
+    [HttpPost("search-by-image")]
+    public async Task<IActionResult> SearchByImage(Microsoft.AspNetCore.Http.IFormFile image)
+    {
+        if (image == null || image.Length == 0)
+            return BadRequest("Không có hình ảnh được tải lên.");
+
+        try
+        {
+            using var httpClient = new HttpClient();
+            using var requestContent = new MultipartFormDataContent();
+            using var imageStream = image.OpenReadStream();
+            using var streamContent = new StreamContent(imageStream);
+            
+            streamContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(image.ContentType);
+            requestContent.Add(streamContent, "image", image.FileName);
+
+            var response = await httpClient.PostAsync("http://localhost:8000/api/predict", requestContent);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                return StatusCode((int)response.StatusCode, "Lỗi từ AI Server");
+            }
+
+            var rawIds = await response.Content.ReadFromJsonAsync<System.Collections.Generic.List<string>>();
+            var recommendedIds = rawIds?.Select(id => System.IO.Path.GetFileNameWithoutExtension(id).Trim().ToLower()).ToList();
+
+            if (recommendedIds == null || recommendedIds.Count == 0)
+            {
+                return Ok(new { data = new System.Collections.Generic.List<object>() });
+            }
+
+            var products = await _context.Products
+                .Include(p => p.ProductVariants)
+                .Where(p => p.IsActived && recommendedIds.Contains(p.ProductId.ToLower()))
+                .ToListAsync();
+
+            // Sắp xếp lại theo đúng thứ tự của recommendedIds từ Python
+            var sortedProducts = products
+                .OrderBy(p => recommendedIds.IndexOf(p.ProductId.ToLower()))
+                .Select(p => new
+                {
+                    p.ProductId,
+                    p.ProductName,
+                    ImageUrl = string.IsNullOrEmpty(p.ImageUrl) ? (p.ProductVariants.FirstOrDefault() != null ? p.ProductVariants.FirstOrDefault().ImageUrl : "") : p.ImageUrl,
+                    DiscountPercentage = (p.DiscountPercentage > 0 && (p.DiscountEndDate == null || p.DiscountEndDate >= DateTime.Now)) ? p.DiscountPercentage : 0,
+                    OriginalPrice = p.ProductVariants.FirstOrDefault() != null ? p.ProductVariants.FirstOrDefault().OriginalPrice : 0,
+                    CurrentPrice = (p.DiscountPercentage > 0 && (p.DiscountEndDate == null || p.DiscountEndDate >= DateTime.Now)) ? (p.ProductVariants.FirstOrDefault() != null ? p.ProductVariants.FirstOrDefault().CurrentPrice : 0) : (p.ProductVariants.FirstOrDefault() != null ? p.ProductVariants.FirstOrDefault().OriginalPrice : 0),
+                    SoldQuantity = p.SoldQuantity,
+                    p.CategoryId
+                })
+                .ToList();
+
+            return Ok(new { data = sortedProducts });
+        }
+        catch (System.Exception ex)
         {
             return StatusCode(500, $"Lỗi hệ thống: {ex.Message}");
         }

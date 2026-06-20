@@ -10,8 +10,22 @@ using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
+using FirebaseAdmin;
+using Google.Apis.Auth.OAuth2;
+using BE_ECOMMERCE.Services.Email;
+using BE_ECOMMERCE.Services;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
+
+// Khởi tạo Firebase Admin SDK
+var firebaseKeyPath = Path.Combine(builder.Environment.ContentRootPath, "serviceAccountKey.json");
+if (File.Exists(firebaseKeyPath))
+{
+    FirebaseApp.Create(new AppOptions()
+    {
+        Credential = GoogleCredential.FromFile(firebaseKeyPath)
+    });
+}
 
 
 string jwtKey = builder.Configuration["Jwt:Key"];
@@ -26,9 +40,26 @@ builder.Services.AddOpenApi();
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
 
+builder.Services.AddScoped<BE_ECOMMERCE.Services.CloudinaryService>();
+
+builder.Services.AddScoped<IEmailService, EmailService>();
+builder.Services.AddScoped<IDisputeResolutionExecutor, DisputeResolutionExecutor>();
+builder.Services.AddScoped<BE_ECOMMERCE.Services.Notification.INotificationService, BE_ECOMMERCE.Services.Notification.NotificationService>();
+builder.Services.AddScoped<BE_ECOMMERCE.Services.VnPay.IVnPayService, BE_ECOMMERCE.Services.VnPay.VnPayService>();
+builder.Services.AddHttpClient();
+builder.Services.AddScoped<BE_ECOMMERCE.Services.AiChatService>();
+
+// Đăng ký BackgroundService tự động hủy đơn hàng quá 2 phút
+builder.Services.AddHostedService<BE_ECOMMERCE.Services.OrderCleanupService>();
+// Đăng ký BackgroundService tự động hoàn tất tranh chấp sau 3 ngày
+builder.Services.AddHostedService<BE_ECOMMERCE.Services.AutoResolveDisputeService>();
+
+builder.Services.AddSignalR();
+
 builder.Services.AddControllers().AddJsonOptions(options =>
 {
     options.JsonSerializerOptions.ReferenceHandler = ReferenceHandler.IgnoreCycles;
+    options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
 });
 
 // Nạp cấu hình Authentication
@@ -108,13 +139,14 @@ builder.Services.AddCors(options => options.AddPolicy("AllowReactApp", policy =>
         _ = policy.WithOrigins("http://localhost:" + builder.Configuration["PORT:FE"]) // <--- CHUẨN
                                                                                        // policy.WithOrigins("http://localhost:5173/") <--- SAI (Có dấu gạch chéo ở cuối là vứt đi ngay)
               .AllowAnyHeader()
-              .AllowAnyMethod()));
+              .AllowAnyMethod()
+              .AllowCredentials()));
 
 
 WebApplication app = builder.Build();
 
 // [THÊM ĐOẠN NÀY] - Khởi chạy cỗ máy đồng bộ tự động
-await DbSeeder.AutoSyncPermissions(app.Services);
+// await DbSeeder.AutoSyncPermissions(app.Services);
 
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
@@ -133,6 +165,8 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
+app.MapHub<BE_ECOMMERCE.Hubs.ChatHub>("/chatHub");
+app.MapHub<BE_ECOMMERCE.Hubs.NotificationHub>("/notificationHub");
 
 app.UseStaticFiles();
 

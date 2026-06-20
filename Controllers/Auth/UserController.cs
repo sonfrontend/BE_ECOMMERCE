@@ -28,10 +28,25 @@ public class UserController(ApplicationDbContext context, IConfiguration config)
             {
                 u.UserId,
                 u.UserName,
-                u.FullName
+                u.FullName,
+                u.Email,
+                u.PhoneNumber
             })
             .ToListAsync();
         return Ok(users);
+    }
+
+    [HttpDelete("{id}")]
+    [Authorize]
+    public async Task<IActionResult> DeleteUser(Guid id)
+    {
+        var user = await _context.Users.FindAsync(id);
+        if (user == null)
+            return NotFound(new { message = "Không tìm thấy người dùng!" });
+
+        _context.Users.Remove(user);
+        await _context.SaveChangesAsync();
+        return Ok(new { message = "Đã xóa người dùng thành công!" });
     }
 
     [HttpGet("userRole")]

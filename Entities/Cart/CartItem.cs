@@ -11,8 +11,8 @@ public class CartItem : BaseEntity
     public Guid UserId { get; set; }
     public virtual User User { get; set; }
 
-    public string ArticleId { get; set; }
-    public virtual BE_ECOMMERCE.Entities.Product.Product Product { get; set; }
+    public int VariantId { get; set; }
+    public virtual ProductVariant ProductVariant { get; set; }
 
     public int Quantity { get; set; }
 }

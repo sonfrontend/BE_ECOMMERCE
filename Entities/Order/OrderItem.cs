@@ -10,8 +10,8 @@ public class OrderItem : BaseEntity
     public int OrderId { get; set; }
     public virtual Order Order { get; set; }
 
-    public string ArticleId { get; set; }
-    public virtual BE_ECOMMERCE.Entities.Product.Product Product { get; set; }
+    public int VariantId { get; set; }
+    public virtual ProductVariant ProductVariant { get; set; }
 
     public int Quantity { get; set; }
     public decimal UnitPrice { get; set; }

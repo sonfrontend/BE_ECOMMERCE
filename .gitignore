@@ -36,8 +36,13 @@ appsettings.Secret.json
 *.env
 secrets.json
 
+wwwroot/
+
 # ==========================================
 # 4. FILE RÁC CỦA HỆ ĐIỀU HÀNH
 # ==========================================
 .DS_Store
 Thumbs.db
+
+serviceAccountKey.json
+description.md

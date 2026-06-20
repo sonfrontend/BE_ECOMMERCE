@@ -1,0 +1,49 @@
+BẢNG HƯỚNG DẪN CHỌN SIZE CHUẨN CỦA SHOP (Dùng để tư vấn cho khách)
+
+QUY TẮC CHUNG:
+- Nếu khách hàng nằm giữa 2 size (Ví dụ cân nặng thuộc size M nhưng chiều cao thuộc size L), hãy luôn khuyên khách ưu tiên chọn size theo CHIỀU CAO (vì áo ngắn thì không mặc được, còn áo rộng một chút thì mặc vẫn thoải mái/form oversize).
+- Nếu khách thích mặc form rộng (Oversize) hoặc giấu quần, hãy khuyên cộng thêm 1 Size so với bảng tiêu chuẩn.
+
+1. ÁO NAM (Áo thun, Áo khoác, Sơ mi, Hoodie)
+- Size S: Chiều cao 1m55 - 1m64 | Cân nặng Dưới 55kg
+- Size M: Chiều cao 1m65 - 1m72 | Cân nặng 55kg - 65kg
+- Size L: Chiều cao 1m70 - 1m77 | Cân nặng 66kg - 75kg
+- Size XL: Chiều cao 1m75 - 1m82 | Cân nặng 76kg - 85kg
+- Size XXL: Chiều cao Trên 1m80 | Cân nặng Trên 85kg
+
+2. ÁO NỮ (Áo thun, Croptop, Sơ mi, Váy)
+- Size S: Chiều cao 1m45 - 1m53 | Cân nặng Dưới 45kg
+- Size M: Chiều cao 1m54 - 1m59 | Cân nặng 46kg - 52kg
+- Size L: Chiều cao 1m60 - 1m65 | Cân nặng 53kg - 58kg
+- Size XL: Chiều cao Trên 1m65 | Cân nặng Trên 58kg
+
+3. QUẦN NAM (Quần Jean, Quần Âu, Quần Kaki) - Khuyên theo Cân Nặng và Vòng Bụng
+- Size 29: Cân nặng Dưới 55kg
+- Size 30: Cân nặng 55kg - 60kg
+- Size 31: Cân nặng 60kg - 65kg
+- Size 32: Cân nặng 65kg - 72kg
+- Size 33: Cân nặng 72kg - 78kg
+- Size 34: Cân nặng Trên 78kg
+*Lưu ý: Nếu quần short nam, các size thường là S, M, L, XL thì dùng bảng ÁO NAM để tư vấn.
+
+4. QUẦN NỮ (Quần Jean, Quần Ống rộng, Chân váy)
+- Size 26 (hoặc S): Cân nặng Dưới 45kg
+- Size 27 (hoặc M): Cân nặng 45kg - 48kg
+- Size 28 (hoặc L): Cân nặng 48kg - 52kg
+- Size 29 (hoặc XL): Cân nặng 52kg - 56kg
+- Size 30: Cân nặng Trên 56kg
+
+5. GIÀY DÉP (Sneaker, Boots) - Dựa vào chiều dài bàn chân
+- 22.5 cm -> Size 35 (Nữ)
+- 23.0 cm -> Size 36
+- 23.5 cm -> Size 37
+- 24.0 cm -> Size 38
+- 24.5 cm -> Size 39 (Thường là size nhỏ nhất cho Nam)
+- 25.0 cm -> Size 40
+- 26.0 cm -> Size 41
+- 27.0 cm -> Size 42
+- 28.0 cm -> Size 43
+
+KỊCH BẢN TƯ VẤN (AI CẦN HỌC THUỘC):
+- Khi khách đưa chiều cao/cân nặng: Hãy tính toán dựa trên bảng trên và đưa ra kết luận (Ví dụ: "Dạ với chiều cao 1m70 và nặng 68kg, anh mặc áo size L là đẹp nhất ạ").
+- Nếu khách hỏi sản phẩm không có size như bảng trên (Ví dụ Freesize), hãy trả lời: "Dạ sản phẩm này là hàng Freesize (một cỡ duy nhất), phù hợp với người dưới 70kg ạ".

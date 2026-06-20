@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using BE_ECOMMERCE.Data;
+using BE_ECOMMERCE.DTOs.Carts;
 using BE_ECOMMERCE.Entities.Cart;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -9,39 +10,37 @@ namespace BE_ECOMMERCE.Controllers.Cart;
 
 [Route("api/[controller]")]
 [ApiController]
+[Authorize]
 public class CartController(ApplicationDbContext context) : ControllerBase
 {
     private readonly ApplicationDbContext _context = context;
 
-    public class AddToCartRequest
-    {
-        public string ArticleId { get; set; }
-        public int Quantity { get; set; }
-    }
-
     [HttpGet]
-    [Authorize]
-    public async Task<IActionResult> GetCartItems()
+    public async Task<IActionResult> GetCart()
     {
-        string userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-        if (userId == null) return Unauthorized();
+        var userIdStr = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (string.IsNullOrEmpty(userIdStr) || !Guid.TryParse(userIdStr, out var userId))
+            return Unauthorized("User not found");
 
         var cartItems = await _context.CartItems
-            .Include(c => c.Product)
-            .Where(c => c.UserId == Guid.Parse(userId))
+            .Include(c => c.ProductVariant)
+            .ThenInclude(pv => pv.Product)
+            .Where(c => c.UserId == userId)
             .Select(c => new
             {
-                c.Id,
-                c.Quantity,
-                Product = new
+                id = c.Id,
+                quantity = c.Quantity,
+                product = new
                 {
-                    c.Product.ArticleId,
-                    c.Product.ProductCode,
-                    c.Product.ProductName,
-                    c.Product.Price,
-                    c.Product.ImageUrl,
-                    c.Product.Color,
-                    c.Product.Size
+                    articleId = c.ProductVariant.ProductId,
+                    productName = c.ProductVariant.Product.ProductName,
+                    price = (c.ProductVariant.Product.DiscountPercentage > 0 && (c.ProductVariant.Product.DiscountEndDate == null || c.ProductVariant.Product.DiscountEndDate >= DateTime.Now)) 
+                        ? (c.ProductVariant.CurrentPrice > 0 ? c.ProductVariant.CurrentPrice : c.ProductVariant.OriginalPrice) 
+                        : c.ProductVariant.OriginalPrice,
+                    originalPrice = c.ProductVariant.OriginalPrice,
+                    imageUrl = c.ProductVariant.ImageUrl,
+                    color = c.ProductVariant.Color,
+                    size = c.ProductVariant.Size
                 }
             })
             .ToListAsync();
@@ -50,71 +49,99 @@ public class CartController(ApplicationDbContext context) : ControllerBase
     }
 
     [HttpPost]
-    [Authorize]
     public async Task<IActionResult> AddToCart([FromBody] AddToCartRequest request)
     {
-        string userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-        if (userId == null) return Unauthorized();
+        var userIdStr = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (string.IsNullOrEmpty(userIdStr) || !Guid.TryParse(userIdStr, out var userId))
+            return Unauthorized("User not found");
 
-        var parsedUserId = Guid.Parse(userId);
-
-        var existingItem = await _context.CartItems
-            .FirstOrDefaultAsync(c => c.UserId == parsedUserId && c.ArticleId == request.ArticleId);
-
-        if (existingItem != null)
+        // Tìm variant cụ thể nếu có VariantId
+        Entities.Product.ProductVariant variant = null;
+        if (request.VariantId.HasValue && request.VariantId.Value > 0)
         {
-            existingItem.Quantity += request.Quantity;
+            variant = await _context.ProductVariants.FirstOrDefaultAsync(v => v.VariantId == request.VariantId.Value);
         }
         else
         {
-            var cartItem = new CartItem
+            variant = await _context.ProductVariants.FirstOrDefaultAsync(v => v.ProductId == request.ArticleId);
+        }
+        if (variant == null)
+            return NotFound("Sản phẩm không tồn tại");
+
+        var cartItem = await _context.CartItems.FirstOrDefaultAsync(c => c.UserId == userId && c.VariantId == variant.VariantId);
+        int currentQuantity = cartItem != null ? cartItem.Quantity : 0;
+        
+        if (currentQuantity + request.Quantity > variant.StockQuantity)
+            return BadRequest($"Sản phẩm này chỉ còn {variant.StockQuantity} cái trong kho");
+
+        if (cartItem != null)
+            cartItem.Quantity += request.Quantity;
+        else
+        {
+            cartItem = new CartItem
             {
-                UserId = parsedUserId,
-                ArticleId = request.ArticleId,
+                UserId = userId,
+                VariantId = variant.VariantId,
                 Quantity = request.Quantity
             };
             _context.CartItems.Add(cartItem);
         }
-
         await _context.SaveChangesAsync();
-        return Ok(new { message = "Đã thêm vào giỏ hàng" });
+
+        // Ghi nhận tương tác Add to Cart
+        _context.UserInteractions.Add(new BE_ECOMMERCE.Entities.UserInteraction
+        {
+            UserId = userId,
+            ProductId = request.ArticleId,
+            InteractionType = "CART",
+            Score = 3,
+            CreatedAt = DateTime.UtcNow
+        });
+        await _context.SaveChangesAsync();
+
+        return Ok("Đã thêm vào giỏ hàng");
     }
 
     [HttpPut("{id}")]
-    [Authorize]
-    public async Task<IActionResult> UpdateCartQuantity(int id, [FromBody] int quantity)
+    public async Task<IActionResult> UpdateCartItem(int id, [FromBody] int quantity)
     {
-        string userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-        if (userId == null) return Unauthorized();
+        var userIdStr = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (string.IsNullOrEmpty(userIdStr) || !Guid.TryParse(userIdStr, out var userId))
+            return Unauthorized("User not found");
 
-        var cartItem = await _context.CartItems.FirstOrDefaultAsync(c => c.Id == id && c.UserId == Guid.Parse(userId));
-        if (cartItem == null) return NotFound("Không tìm thấy sản phẩm trong giỏ hàng");
+        if (quantity < 1)
+            return BadRequest("Số lượng không hợp lệ");
 
-        if (quantity <= 0)
-        {
-            _context.CartItems.Remove(cartItem);
-        }
-        else
-        {
-            cartItem.Quantity = quantity;
-        }
+        var cartItem = await _context.CartItems
+            .Include(c => c.ProductVariant)
+            .FirstOrDefaultAsync(c => c.Id == id && c.UserId == userId);
+            
+        if (cartItem == null)
+            return NotFound("Không tìm thấy sản phẩm trong giỏ");
 
+        if (quantity > cartItem.ProductVariant.StockQuantity)
+            return BadRequest($"Sản phẩm này chỉ còn {cartItem.ProductVariant.StockQuantity} cái trong kho");
+
+        cartItem.Quantity = quantity;
         await _context.SaveChangesAsync();
-        return Ok(new { message = "Đã cập nhật số lượng" });
+        
+        return Ok("Đã cập nhật số lượng");
     }
 
     [HttpDelete("{id}")]
-    [Authorize]
     public async Task<IActionResult> RemoveFromCart(int id)
     {
-        string userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-        if (userId == null) return Unauthorized();
+        var userIdStr = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (string.IsNullOrEmpty(userIdStr) || !Guid.TryParse(userIdStr, out var userId))
+            return Unauthorized("User not found");
 
-        var cartItem = await _context.CartItems.FirstOrDefaultAsync(c => c.Id == id && c.UserId == Guid.Parse(userId));
-        if (cartItem == null) return NotFound("Không tìm thấy sản phẩm trong giỏ hàng");
+        var cartItem = await _context.CartItems.FirstOrDefaultAsync(c => c.Id == id && c.UserId == userId);
+        if (cartItem == null)
+            return NotFound("Không tìm thấy sản phẩm trong giỏ");
 
         _context.CartItems.Remove(cartItem);
         await _context.SaveChangesAsync();
-        return Ok(new { message = "Đã xóa sản phẩm khỏi giỏ hàng" });
+
+        return Ok("Đã xóa sản phẩm khỏi giỏ hàng");
     }
 }

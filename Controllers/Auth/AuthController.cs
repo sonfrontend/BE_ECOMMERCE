@@ -8,10 +8,11 @@ using BE_ECOMMERCE.Data; // Thay bằng namespace AppDbContext của bạn
 using BE_ECOMMERCE.DTOs.Auths;
 using BE_ECOMMERCE.Entities.Auth;
 
-using Google.Apis.Auth;
+using FirebaseAdmin.Auth;
 
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 
 
@@ -30,7 +31,10 @@ public class AuthController(ApplicationDbContext context, IConfiguration config)
 
 
         bool isPasswordValid = false;
-        User user = _context.Users.FirstOrDefault(u => u.UserName == request.UserName);
+        User user = _context.Users
+            .Include(u => u.UserRoles)
+            .ThenInclude(ur => ur.Role)
+            .FirstOrDefault(u => u.UserName == request.UserName);
         if (user == null)
         {
             return Unauthorized(new { message = "Tên đăng nhập hoặc mật khẩu không đúng!" });
@@ -71,6 +75,7 @@ public class AuthController(ApplicationDbContext context, IConfiguration config)
                 avatarUrl = user.AvatarUrl,
                 googleId = user.GoogleId,
                 phoneNumber = user.PhoneNumber,
+                roles = user.UserRoles?.Select(ur => ur.Role?.RoleName).Where(r => r != null).ToList() ?? new List<string>()
             },
             message = "Đăng nhập thành công với userName, password!"
         });
@@ -115,6 +120,30 @@ public class AuthController(ApplicationDbContext context, IConfiguration config)
         };
 
         _ = _context.Users.Add(newUser);
+
+        // Tạo 2 Voucher chào mừng cho User mới
+        var welcomeVoucher1 = await _context.Vouchers.FirstOrDefaultAsync(v => v.Code == "WELCOME10K");
+        var welcomeVoucher2 = await _context.Vouchers.FirstOrDefaultAsync(v => v.Code == "SUMMER20K");
+
+        if (welcomeVoucher1 != null)
+        {
+            _context.UserVouchers.Add(new BE_ECOMMERCE.Entities.Promotion.UserVoucher
+            {
+                UserId = newUser.UserId,
+                VoucherId = welcomeVoucher1.Id,
+                IsUsed = false
+            });
+        }
+        if (welcomeVoucher2 != null)
+        {
+            _context.UserVouchers.Add(new BE_ECOMMERCE.Entities.Promotion.UserVoucher
+            {
+                UserId = newUser.UserId,
+                VoucherId = welcomeVoucher2.Id,
+                IsUsed = false
+            });
+        }
+
         _ = await _context.SaveChangesAsync();
 
         return Ok(new { message = "Đăng ký thành công!" });
@@ -124,7 +153,10 @@ public class AuthController(ApplicationDbContext context, IConfiguration config)
     [HttpPost("refresh-token")]
     public async Task<IActionResult> RefreshToken([FromBody] RefreshTokenRequest request)
     {
-        User user = _context.Users.FirstOrDefault(u => u.RefreshToken == request.RefreshToken);
+        User user = _context.Users
+            .Include(u => u.UserRoles)
+            .ThenInclude(ur => ur.Role)
+            .FirstOrDefault(u => u.RefreshToken == request.RefreshToken);
 
         if (user == null || user.RefreshTokenExpiryTime <= DateTime.UtcNow)
         {
@@ -155,25 +187,18 @@ public class AuthController(ApplicationDbContext context, IConfiguration config)
     {
         try
         {
-            // 1. Lấy Google Client ID từ appsettings.json ra để làm mốc đối chiếu
-            string clientId = _config["Google:ClientId"];
+            // Xác thực Firebase ID Token thay vì dùng Google API gốc
+            FirebaseToken decodedToken = await FirebaseAuth.DefaultInstance.VerifyIdTokenAsync(request.IdToken);
 
-            if (string.IsNullOrEmpty(clientId))
-            {
-                return StatusCode(500, new { message = "Chưa cấu hình Google ClientId trên Server" });
-            }
-
-            GoogleJsonWebSignature.ValidationSettings settings = new()
-            {
-                Audience = [clientId],
-            };
-
-            // 2. Ném ID Token của React gửi lên cho Google kiểm tra
-            // Nếu Token bị sửa đổi hoặc hết hạn, dòng này sẽ văng lỗi ngay!
-            GoogleJsonWebSignature.Payload payload = await GoogleJsonWebSignature.ValidateAsync(request.IdToken, settings);
+            string email = decodedToken.Claims.ContainsKey("email") ? decodedToken.Claims["email"].ToString() : "";
+            string name = decodedToken.Claims.ContainsKey("name") ? decodedToken.Claims["name"].ToString() : "";
+            string googleId = decodedToken.Uid;
 
             // 3. Nếu hàng chuẩn, móc Email ra và tìm xem người này từng vào hệ thống chưa
-            User user = _context.Users.FirstOrDefault(u => u.Email == payload.Email);
+            User user = _context.Users
+                .Include(u => u.UserRoles)
+                .ThenInclude(ur => ur.Role)
+                .FirstOrDefault(u => u.Email == email);
 
             string newRefreshToken = GenerateRefreshToken();
 
@@ -181,12 +206,16 @@ public class AuthController(ApplicationDbContext context, IConfiguration config)
             if (user == null)
             {
                 Guid userId = Guid.NewGuid();
+                string baseUserName = email.Split('@')[0];
+                string uniqueUserName = $"{baseUserName}_{Guid.NewGuid().ToString("N").Substring(0, 4)}";
+
                 user = new User // (Tên class model Users của bạn)
                 {
                     UserId = userId, // Tự sinh ID ngay ở code
-                    FullName = payload.Name, // Lấy luôn tên Google làm tên hiển thị
-                    Email = payload.Email,
-                    GoogleId = payload.Subject,
+                    UserName = uniqueUserName, // Cần có UserName vì required
+                    FullName = name, // Lấy luôn tên Google làm tên hiển thị
+                    Email = email,
+                    GoogleId = googleId,
                     PasswordHash = "", // Đăng nhập Google thì mật khẩu để trống
                 };
 
@@ -194,6 +223,30 @@ public class AuthController(ApplicationDbContext context, IConfiguration config)
                 _ = _context.Users.Add(user);
                 user.RefreshToken = newRefreshToken;
                 user.RefreshTokenExpiryTime = DateTime.UtcNow.AddDays(7);
+
+                // Tạo 2 Voucher chào mừng cho User mới
+                var welcomeVoucher1 = await _context.Vouchers.FirstOrDefaultAsync(v => v.Code == "WELCOME10K");
+                var welcomeVoucher2 = await _context.Vouchers.FirstOrDefaultAsync(v => v.Code == "SUMMER20K");
+
+                if (welcomeVoucher1 != null)
+                {
+                    _context.UserVouchers.Add(new BE_ECOMMERCE.Entities.Promotion.UserVoucher
+                    {
+                        UserId = user.UserId,
+                        VoucherId = welcomeVoucher1.Id,
+                        IsUsed = false
+                    });
+                }
+                if (welcomeVoucher2 != null)
+                {
+                    _context.UserVouchers.Add(new BE_ECOMMERCE.Entities.Promotion.UserVoucher
+                    {
+                        UserId = user.UserId,
+                        VoucherId = welcomeVoucher2.Id,
+                        IsUsed = false
+                    });
+                }
+
                 _ = await _context.SaveChangesAsync();
 
                 return Ok(new
@@ -203,9 +256,11 @@ public class AuthController(ApplicationDbContext context, IConfiguration config)
                     userInfo = new
                     {
                         id = userId,
-                        fullName = payload.Name,
-                        email = payload.Email,
-                        googleId = payload.Subject,
+                        userName = uniqueUserName,
+                        fullName = name,
+                        email = email,
+                        googleId = googleId,
+                        roles = user.UserRoles?.Select(ur => ur.Role?.RoleName).Where(r => r != null).ToList() ?? new List<string>()
                     },
                     message = "Đăng nhập bằng Google thành công!"
                 });
@@ -230,20 +285,21 @@ public class AuthController(ApplicationDbContext context, IConfiguration config)
                         email = user.Email,
                         googleId = user.GoogleId,
                         phoneNumber = user.PhoneNumber,
+                        roles = user.UserRoles?.Select(ur => ur.Role?.RoleName).Where(r => r != null).ToList() ?? new List<string>()
                     },
                     message = "Đăng nhập bằng Google thành công!"
                 });
             }
         }
-        catch (InvalidJwtException ex)
+        catch (FirebaseAuthException ex)
         {
             // Bắt lỗi nếu React gửi lên Token tào lao
             // return Unauthorized(new { message = "Token Google không hợp lệ hoặc đã hết hạn!" });
 
             return Unauthorized(new
             {
-                message = "Lỗi từ Google: " + ex.Message,
-                chi_tiet = "Token bị từ chối tại hàm ValidateAsync"
+                message = "Lỗi từ Firebase: " + ex.Message,
+                chi_tiet = "Token bị từ chối tại hàm VerifyIdTokenAsync"
             });
         }
         catch (Exception ex)
@@ -258,9 +314,21 @@ public class AuthController(ApplicationDbContext context, IConfiguration config)
         List<Claim> claims =
         [
             new(ClaimTypes.NameIdentifier, user.UserId.ToString()),
-            new(ClaimTypes.Name, user.UserName),
-            new(ClaimTypes.Email, user.Email),
+            new(ClaimTypes.Name, user.UserName ?? string.Empty),
+            new(ClaimTypes.Email, user.Email ?? string.Empty)
         ];
+
+        // Gắn tất cả các Role của User vào Token
+        if (user.UserRoles != null)
+        {
+            foreach (var ur in user.UserRoles)
+            {
+                if (ur.Role != null)
+                {
+                    claims.Add(new Claim(ClaimTypes.Role, ur.Role.RoleName));
+                }
+            }
+        }
 
         SymmetricSecurityKey key = new(Encoding.UTF8.GetBytes(_config["Jwt:Key"]));
         SigningCredentials creds = new(key, SecurityAlgorithms.HmacSha256);
