@@ -32,23 +32,23 @@ public class DisputeResolutionExecutor(ApplicationDbContext context, IVnPayServi
                     bool refundSuccess = await vnPayService.RefundAsync(order, refundAmt, refundType, executorName);
                     if (!refundSuccess)
                         return (false, "Lỗi khi gọi API hoàn tiền qua VNPay.");
-                }
 
-                // Cập nhật ví giả lập Admin
-                var adminWallet = await context.SandboxWallets.FirstOrDefaultAsync(w => w.AccountType == "ADMIN");
-                if (adminWallet != null)
-                {
-                    adminWallet.Balance -= refundAmt;
-                    context.TransactionHistories.Add(new Entities.System.TransactionHistory
+                    // Cập nhật ví giả lập Admin chỉ khi hoàn qua VNPAY
+                    var adminWallet = await context.SandboxWallets.FirstOrDefaultAsync(w => w.AccountType == "ADMIN");
+                    if (adminWallet != null)
                     {
-                        WalletId = adminWallet.Id,
-                        OrderId = order.Id,
-                        AmountChanged = -refundAmt,
-                        NewBalance = adminWallet.Balance,
-                        TransactionType = "REFUND",
-                        TransactionDate = DateTime.Now,
-                        Description = $"Hoàn tiền tranh chấp ({(complaint.IsFullRefund ? "toàn bộ" : "một phần")}) cho đơn hàng #{order.Id}"
-                    });
+                        adminWallet.Balance -= refundAmt;
+                        context.TransactionHistories.Add(new Entities.System.TransactionHistory
+                        {
+                            WalletId = adminWallet.Id,
+                            OrderId = order.Id,
+                            AmountChanged = -refundAmt,
+                            NewBalance = adminWallet.Balance,
+                            TransactionType = "REFUND",
+                            TransactionDate = DateTime.Now,
+                            Description = $"Hoàn tiền tranh chấp ({(complaint.IsFullRefund ? "toàn bộ" : "một phần")}) cho đơn hàng #{order.Id}"
+                        });
+                    }
                 }
             }
         }

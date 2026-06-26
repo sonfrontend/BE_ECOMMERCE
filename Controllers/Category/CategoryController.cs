@@ -16,9 +16,10 @@ public class CategoryDto
 
 [Route("api/[controller]")]
 [ApiController]
-public class CategoryController(ApplicationDbContext context) : ControllerBase
+public class CategoryController(ApplicationDbContext context, BE_ECOMMERCE.Services.CloudinaryService cloudinaryService) : ControllerBase
 {
     private readonly ApplicationDbContext _context = context;
+    private readonly BE_ECOMMERCE.Services.CloudinaryService _cloudinaryService = cloudinaryService;
 
     [HttpGet]
     public async Task<IActionResult> GetCategories()
@@ -70,9 +71,20 @@ public class CategoryController(ApplicationDbContext context) : ControllerBase
             UpdatedAt = DateTime.Now
         };
 
-        _context.Categories.Add(newCategory);
-        await _context.SaveChangesAsync();
-        return Ok(newCategory);
+        try
+        {
+            _context.Categories.Add(newCategory);
+            await _context.SaveChangesAsync();
+            return Ok(newCategory);
+        }
+        catch (Exception ex)
+        {
+            if (!string.IsNullOrEmpty(newCategory.IconUrl))
+            {
+                await _cloudinaryService.DeleteImageAsync(newCategory.IconUrl, "images/categories");
+            }
+            return StatusCode(500, new { message = "Lỗi hệ thống khi lưu danh mục." });
+        }
     }
 
     [HttpPut("admin/{id}")]
@@ -90,14 +102,34 @@ public class CategoryController(ApplicationDbContext context) : ControllerBase
             level = parent.Level + 1;
         }
 
+        string? oldImageUrl = category.IconUrl;
+        bool isImageChanged = oldImageUrl != model.IconUrl;
+
         category.Name = model.Name;
         category.IconUrl = model.IconUrl;
         category.ParentId = model.ParentId;
         category.Level = level;
         category.UpdatedAt = DateTime.Now;
 
-        await _context.SaveChangesAsync();
-        return Ok(category);
+        try
+        {
+            await _context.SaveChangesAsync();
+
+            if (isImageChanged && !string.IsNullOrEmpty(oldImageUrl))
+            {
+                await _cloudinaryService.DeleteImageAsync(oldImageUrl, "images/categories");
+            }
+
+            return Ok(category);
+        }
+        catch (Exception ex)
+        {
+            if (isImageChanged && !string.IsNullOrEmpty(model.IconUrl))
+            {
+                await _cloudinaryService.DeleteImageAsync(model.IconUrl, "images/categories");
+            }
+            return StatusCode(500, new { message = "Lỗi hệ thống khi cập nhật danh mục." });
+        }
     }
 
     [HttpDelete("admin/{id}")]
@@ -120,8 +152,23 @@ public class CategoryController(ApplicationDbContext context) : ControllerBase
             return BadRequest("Không thể xóa danh mục này vì vẫn còn sản phẩm thuộc danh mục.");
         }
 
+        string? iconUrlToDelete = category.IconUrl;
+
         _context.Categories.Remove(category);
         await _context.SaveChangesAsync();
+
+        if (!string.IsNullOrEmpty(iconUrlToDelete))
+        {
+            try
+            {
+                await _cloudinaryService.DeleteImageAsync(iconUrlToDelete, "images/categories");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Lỗi xóa ảnh danh mục: {ex.Message}");
+            }
+        }
+
         return Ok(new { message = "Xóa danh mục thành công." });
     }
 }

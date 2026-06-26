@@ -19,10 +19,18 @@ public class AiChatController : ControllerBase
         _aiChatService = aiChatService;
     }
 
+    public class ChatMessageHistory
+    {
+        public string Role { get; set; } = string.Empty;
+        public string Text { get; set; } = string.Empty;
+    }
+
     public class AiChatRequest
     {
         public string Message { get; set; } = string.Empty;
         public string? SharedProductId { get; set; }
+        public string? ImageName { get; set; }
+        public System.Collections.Generic.List<ChatMessageHistory>? History { get; set; }
     }
 
     [HttpPost("ask")]
@@ -41,7 +49,7 @@ public class AiChatController : ControllerBase
 
         try
         {
-            var responseText = await _aiChatService.AskAiAsync(userId, request.Message, request.SharedProductId);
+            var responseText = await _aiChatService.AskAiAsync(userId, request.Message, request.SharedProductId, request.ImageName, request.History);
             return Ok(new { reply = responseText });
         }
         catch (Exception ex)

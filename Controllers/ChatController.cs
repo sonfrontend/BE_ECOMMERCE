@@ -140,11 +140,16 @@ public class ChatController(ApplicationDbContext context, IHubContext<ChatHub> h
     }
 
     [HttpPost("upload-image")]
-    public async Task<IActionResult> UploadImage([FromForm] Microsoft.AspNetCore.Http.IFormFile file)
+    public async Task<IActionResult> UploadImage([FromForm] Microsoft.AspNetCore.Http.IFormFile file, [FromForm] string? oldImageUrl, [FromForm] string folder = "images/messages")
     {
         try
         {
-            var imageName = await cloudinaryService.UploadImageAsync(file);
+            if (!string.IsNullOrEmpty(oldImageUrl))
+            {
+                await cloudinaryService.DeleteImageAsync(oldImageUrl, folder);
+            }
+            
+            var imageName = await cloudinaryService.UploadImageAsync(file, folder);
             if (string.IsNullOrEmpty(imageName))
                 return BadRequest(new { message = "Không tìm thấy file hợp lệ." });
 
@@ -157,15 +162,42 @@ public class ChatController(ApplicationDbContext context, IHubContext<ChatHub> h
     }
 
     [HttpPost("upload-complaint-image")]
-    public async Task<IActionResult> UploadComplaintImage([FromForm] Microsoft.AspNetCore.Http.IFormFile file)
+    public async Task<IActionResult> UploadComplaintImage([FromForm] Microsoft.AspNetCore.Http.IFormFile file, [FromForm] string? oldImageUrl)
     {
         try
         {
+            if (!string.IsNullOrEmpty(oldImageUrl))
+            {
+                await cloudinaryService.DeleteComplaintImageAsync(oldImageUrl);
+            }
+            
             var imageName = await cloudinaryService.UploadComplaintImageAsync(file);
             if (string.IsNullOrEmpty(imageName))
                 return BadRequest(new { message = "Không tìm thấy file hợp lệ." });
 
             return Ok(new { imageName });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = "Lỗi upload ảnh: " + ex.Message });
+        }
+    }
+
+    [HttpPost("upload-banner-image")]
+    public async Task<IActionResult> UploadBannerImage([FromForm] Microsoft.AspNetCore.Http.IFormFile file, [FromForm] string? oldImageUrl)
+    {
+        try
+        {
+            if (!string.IsNullOrEmpty(oldImageUrl))
+            {
+                await cloudinaryService.DeleteBannerImageAsync(oldImageUrl);
+            }
+            
+            var imageName = await cloudinaryService.UploadBannerImageAsync(file);
+            if (string.IsNullOrEmpty(imageName))
+                return BadRequest(new { message = "Không tìm thấy file hợp lệ." });
+
+            return Ok(new { url = imageName }); // Return 'url' because frontend CustomImageUpload expects res.data.url
         }
         catch (Exception ex)
         {

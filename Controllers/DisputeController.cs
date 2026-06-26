@@ -26,7 +26,8 @@ public class DisputeController(
     IHubContext<ChatHub> hubContext, 
     IVnPayService vnPayService, 
     INotificationService notificationService,
-    IDisputeResolutionExecutor executor) : ControllerBase
+    IDisputeResolutionExecutor executor,
+    BE_ECOMMERCE.Services.CloudinaryService cloudinaryService) : ControllerBase
 {
     private Guid GetUserId() => Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier) ?? Guid.Empty.ToString());
     private bool IsAdmin() => User.Claims.Any(c => c.Type == ClaimTypes.Role && (c.Value == "Admin" || c.Value == "SuperAdmin"));
@@ -87,7 +88,18 @@ public class DisputeController(
         context.Complaints.Add(complaint);
         order.Status = OrderStatus.Disputed;
         
-        await context.SaveChangesAsync();
+        try
+        {
+            await context.SaveChangesAsync();
+        }
+        catch (Exception ex)
+        {
+            if (!string.IsNullOrEmpty(dto.EvidenceUrl))
+            {
+                await cloudinaryService.DeleteComplaintImageAsync(dto.EvidenceUrl);
+            }
+            return StatusCode(500, new { message = "Lỗi hệ thống khi tạo khiếu nại." });
+        }
 
         await notificationService.SendNotificationAsync(
             userId,
@@ -168,6 +180,8 @@ public class DisputeController(
         complaint.HandlingMethodId = template.Id;
         complaint.RefundAmount = dto.RefundAmount;
         complaint.AdminNote = dto.AdminNote;
+        string? oldAdminEvidenceUrl = complaint.AdminEvidenceUrl;
+        bool isAdminEvidenceChanged = oldAdminEvidenceUrl != dto.AdminEvidenceUrl;
         complaint.AdminEvidenceUrl = dto.AdminEvidenceUrl;
         complaint.RestoresInventory = dto.RestoresInventory;
         complaint.IsFullRefund = dto.IsFullRefund;
@@ -175,10 +189,26 @@ public class DisputeController(
         complaint.PaymentMethod = dto.PaymentMethod;
         complaint.FinalOrderStatus = dto.FinalOrderStatus;
         
-        complaint.Status = "Processing";
+        complaint.Status = "ResolutionProposed";
         complaint.Order.Status = OrderStatus.PendingResolution;
 
-        await context.SaveChangesAsync();
+        try
+        {
+            await context.SaveChangesAsync();
+            
+            if (isAdminEvidenceChanged && !string.IsNullOrEmpty(oldAdminEvidenceUrl))
+            {
+                await cloudinaryService.DeleteComplaintImageAsync(oldAdminEvidenceUrl);
+            }
+        }
+        catch (Exception ex)
+        {
+            if (isAdminEvidenceChanged && !string.IsNullOrEmpty(dto.AdminEvidenceUrl))
+            {
+                await cloudinaryService.DeleteComplaintImageAsync(dto.AdminEvidenceUrl);
+            }
+            return StatusCode(500, new { message = "Lỗi hệ thống khi đề xuất giải quyết." });
+        }
 
         await hubContext.Clients.Group(complaint.UserId.ToString()).SendAsync("ResolutionProposed", new {
             ComplaintId = complaint.Id,

@@ -132,18 +132,21 @@ public class OrderController(ApplicationDbContext context, BE_ECOMMERCE.Services
         Entities.Promotion.Promotion? appliedPromotion = null;
         if (appliedVoucher == null)
         {
-            // Nếu không dùng Voucher, kiểm tra xem có Promotion nào đang chạy không
-            // Lấy Promotion đang chạy mà user này chưa sử dụng
-            var activePromotion = await _context.Promotions
-                .Where(p => p.IsActived && p.StartDate <= now && p.EndDate >= now)
-                .Where(p => !_context.UserPromotions.Any(up => up.PromotionId == p.Id && up.UserId == userId && up.IsUsed))
-                .OrderByDescending(p => p.StartDate)
-                .FirstOrDefaultAsync();
-
-            if (activePromotion != null)
+            // Chỉ áp dụng Khuyến mãi toàn sàn cho đơn hàng ĐẦU TIÊN
+            bool hasOrdered = await _context.Orders.AnyAsync(o => o.UserId == userId);
+            if (!hasOrdered)
             {
-                discountAmount = totalAmount * (activePromotion.DiscountPercentage / 100m);
-                appliedPromotion = activePromotion;
+                var activePromotion = await _context.Promotions
+                    .Where(p => p.IsActived && p.StartDate <= now && p.EndDate >= now)
+                    .Where(p => !_context.UserPromotions.Any(up => up.PromotionId == p.Id && up.UserId == userId && up.IsUsed))
+                    .OrderByDescending(p => p.StartDate)
+                    .FirstOrDefaultAsync();
+
+                if (activePromotion != null)
+                {
+                    discountAmount = totalAmount * (activePromotion.DiscountPercentage / 100m);
+                    appliedPromotion = activePromotion;
+                }
             }
         }
 
@@ -223,6 +226,32 @@ public class OrderController(ApplicationDbContext context, BE_ECOMMERCE.Services
             "OrderCreated",
             order.Id.ToString()
         );
+
+        // Gửi thông báo cho Admin
+        var adminRoleIds = await _context.Roles
+            .Where(r => r.RoleName == "Admin" || r.RoleName == "SuperAdmin")
+            .Select(r => r.RoleId)
+            .ToListAsync();
+            
+        if (adminRoleIds.Any())
+        {
+            var adminIds = await _context.UserRoles
+                .Where(ur => adminRoleIds.Contains(ur.RoleId))
+                .Select(ur => ur.UserId)
+                .Distinct()
+                .ToListAsync();
+            
+            foreach (var adminId in adminIds)
+            {
+                await _notificationService.SendNotificationAsync(
+                    adminId, 
+                    "Đơn hàng mới", 
+                    $"Có đơn hàng mới #{order.Id} trị giá {order.TotalAmount:N0}đ", 
+                    "System", 
+                    order.Id.ToString()
+                );
+            }
+        }
 
         return Ok(new
         {

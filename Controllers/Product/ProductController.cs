@@ -34,7 +34,7 @@ public class ProductController(ApplicationDbContext context, IConfiguration conf
             var response = await client.PostAsJsonAsync($"{aiServiceUrl}/api/recommend-cf", new
             {
                 user_id = userIdStr,
-                top_k = 10
+                top_k = 20
             });
 
             if (response.IsSuccessStatusCode)
@@ -52,7 +52,8 @@ public class ProductController(ApplicationDbContext context, IConfiguration conf
                             price = (p.DiscountPercentage > 0 && (p.DiscountEndDate == null || p.DiscountEndDate >= DateTime.Now)) ? _context.ProductVariants.Where(v => v.ProductId == p.ProductId).Select(v => v.CurrentPrice).FirstOrDefault() : _context.ProductVariants.Where(v => v.ProductId == p.ProductId).Select(v => v.OriginalPrice).FirstOrDefault(),
                             originalPrice = _context.ProductVariants.Where(v => v.ProductId == p.ProductId).Select(v => v.OriginalPrice).FirstOrDefault(),
                             discountPercentage = (p.DiscountPercentage > 0 && (p.DiscountEndDate == null || p.DiscountEndDate >= DateTime.Now)) ? p.DiscountPercentage : 0,
-                            imageUrl = p.ImageUrl
+                            imageUrl = p.ImageUrl,
+                            soldQuantity = p.SoldQuantity
                         })
                         .ToListAsync();
 
@@ -103,7 +104,8 @@ public class ProductController(ApplicationDbContext context, IConfiguration conf
                             price = (p.DiscountPercentage > 0 && (p.DiscountEndDate == null || p.DiscountEndDate >= DateTime.Now)) ? _context.ProductVariants.Where(v => v.ProductId == p.ProductId).Select(v => v.CurrentPrice).FirstOrDefault() : _context.ProductVariants.Where(v => v.ProductId == p.ProductId).Select(v => v.OriginalPrice).FirstOrDefault(),
                             originalPrice = _context.ProductVariants.Where(v => v.ProductId == p.ProductId).Select(v => v.OriginalPrice).FirstOrDefault(),
                             discountPercentage = (p.DiscountPercentage > 0 && (p.DiscountEndDate == null || p.DiscountEndDate >= DateTime.Now)) ? p.DiscountPercentage : 0,
-                            imageUrl = p.ImageUrl
+                            imageUrl = p.ImageUrl,
+                            soldQuantity = p.SoldQuantity
                         })
                         .ToListAsync();
 
@@ -219,7 +221,8 @@ public class ProductController(ApplicationDbContext context, IConfiguration conf
     {
         var products = await _context.Products
             .OrderByDescending(p => p.SoldQuantity) // Fallback: Best sellers
-            .Take(10)
+            .ThenByDescending(p => _context.Favorites.Count(f => f.ProductId == p.ProductId)) // Then by Most Favorites
+            .Take(20)
             .Select(p => new
             {
                 articleId = p.ProductId,
@@ -227,7 +230,8 @@ public class ProductController(ApplicationDbContext context, IConfiguration conf
                 price = (p.DiscountPercentage > 0 && (p.DiscountEndDate == null || p.DiscountEndDate >= DateTime.Now)) ? _context.ProductVariants.Where(v => v.ProductId == p.ProductId).Select(v => v.CurrentPrice).FirstOrDefault() : _context.ProductVariants.Where(v => v.ProductId == p.ProductId).Select(v => v.OriginalPrice).FirstOrDefault(),
                 originalPrice = _context.ProductVariants.Where(v => v.ProductId == p.ProductId).Select(v => v.OriginalPrice).FirstOrDefault(),
                 discountPercentage = (p.DiscountPercentage > 0 && (p.DiscountEndDate == null || p.DiscountEndDate >= DateTime.Now)) ? p.DiscountPercentage : 0,
-                imageUrl = p.ImageUrl
+                imageUrl = p.ImageUrl,
+                soldQuantity = p.SoldQuantity
             })
             .ToListAsync();
         return Ok(products);
@@ -293,9 +297,12 @@ public class ProductController(ApplicationDbContext context, IConfiguration conf
     {
         try
         {
+            var now = DateTime.Now;
             var query = _context.Products
                 .Include(p => p.ProductVariants)
-                .Where(p => p.IsActived && p.DiscountPercentage >= 15);
+                .Where(p => p.IsActived && p.DiscountPercentage >= 15 && 
+                            (p.DiscountStartDate == null || p.DiscountStartDate <= now) &&
+                            (p.DiscountEndDate == null || p.DiscountEndDate >= now));
 
             var totalCount = await query.CountAsync();
 
@@ -332,7 +339,7 @@ public class ProductController(ApplicationDbContext context, IConfiguration conf
     }
 
     [HttpGet]
-    public async Task<IActionResult> GetProducts([FromQuery] int? categoryId, [FromQuery] string keyword, [FromQuery] string sortBy, [FromQuery] string? sortPrice, [FromQuery] bool? isFlashSale, [FromQuery] bool? isFavorite, [FromQuery] int page = 1, [FromQuery] int pageSize = 12)
+    public async Task<IActionResult> GetProducts([FromQuery] int? categoryId, [FromQuery] string keyword, [FromQuery] string sortBy, [FromQuery] string? sortPrice, [FromQuery] decimal? minPrice, [FromQuery] decimal? maxPrice, [FromQuery] bool? isFlashSale, [FromQuery] bool? isFavorite, [FromQuery] int page = 1, [FromQuery] int pageSize = 12)
     {
         try
         {
@@ -356,12 +363,26 @@ public class ProductController(ApplicationDbContext context, IConfiguration conf
 
             if (isFlashSale == true)
             {
-                query = query.Where(p => p.DiscountPercentage >= 15);
+                var now = DateTime.Now;
+                query = query.Where(p => p.DiscountPercentage >= 15 && 
+                                         (p.DiscountStartDate == null || p.DiscountStartDate <= now) &&
+                                         (p.DiscountEndDate == null || p.DiscountEndDate >= now));
             }
 
             if (!string.IsNullOrEmpty(keyword))
             {
                 query = query.Where(p => p.ProductName.Contains(keyword) || (p.Description != null && p.Description.Contains(keyword)));
+            }
+
+            if (minPrice.HasValue || maxPrice.HasValue)
+            {
+                decimal min = minPrice ?? 0;
+                decimal max = maxPrice ?? decimal.MaxValue;
+                var now = DateTime.Now;
+                query = query.Where(p => p.ProductVariants.Any(v => 
+                    ((p.DiscountPercentage > 0 && (p.DiscountEndDate == null || p.DiscountEndDate >= now)) ? v.CurrentPrice : v.OriginalPrice) >= min &&
+                    ((p.DiscountPercentage > 0 && (p.DiscountEndDate == null || p.DiscountEndDate >= now)) ? v.CurrentPrice : v.OriginalPrice) <= max
+                ));
             }
 
             if (categoryId.HasValue)
@@ -413,12 +434,21 @@ public class ProductController(ApplicationDbContext context, IConfiguration conf
             // hoặc sắp xếp đè lên nếu là best_selling/new (vì ta order by giá).
             if (sortPrice == "ins")
             {
-                // Để thay thế OrderBy trước đó, ta phải dùng OrderBy
-                query = query.OrderBy(p => p.ProductVariants.FirstOrDefault() != null ? p.ProductVariants.FirstOrDefault().CurrentPrice : 0);
+                var now = DateTime.Now;
+                query = query.OrderBy(p => p.ProductVariants.FirstOrDefault() != null 
+                    ? ((p.DiscountPercentage > 0 && (p.DiscountEndDate == null || p.DiscountEndDate >= now)) 
+                        ? p.ProductVariants.FirstOrDefault().CurrentPrice 
+                        : p.ProductVariants.FirstOrDefault().OriginalPrice) 
+                    : 0);
             }
             else if (sortPrice == "des")
             {
-                query = query.OrderByDescending(p => p.ProductVariants.FirstOrDefault() != null ? p.ProductVariants.FirstOrDefault().CurrentPrice : 0);
+                var now = DateTime.Now;
+                query = query.OrderByDescending(p => p.ProductVariants.FirstOrDefault() != null 
+                    ? ((p.DiscountPercentage > 0 && (p.DiscountEndDate == null || p.DiscountEndDate >= now)) 
+                        ? p.ProductVariants.FirstOrDefault().CurrentPrice 
+                        : p.ProductVariants.FirstOrDefault().OriginalPrice) 
+                    : 0);
             }
 
             var products = await query
@@ -487,7 +517,7 @@ public class ProductController(ApplicationDbContext context, IConfiguration conf
     }
 
     [HttpPost("search-by-image")]
-    public async Task<IActionResult> SearchByImage(Microsoft.AspNetCore.Http.IFormFile image)
+    public async Task<IActionResult> SearchByImage(Microsoft.AspNetCore.Http.IFormFile image, [FromForm] int? categoryId)
     {
         if (image == null || image.Length == 0)
             return BadRequest("Không có hình ảnh được tải lên.");
@@ -517,10 +547,24 @@ public class ProductController(ApplicationDbContext context, IConfiguration conf
                 return Ok(new { data = new System.Collections.Generic.List<object>() });
             }
 
-            var products = await _context.Products
+            var productsQuery = _context.Products
                 .Include(p => p.ProductVariants)
-                .Where(p => p.IsActived && recommendedIds.Contains(p.ProductId.ToLower()))
-                .ToListAsync();
+                .Where(p => p.IsActived && recommendedIds.Contains(p.ProductId.ToLower()));
+
+            if (categoryId.HasValue)
+            {
+                var categoryIds = new System.Collections.Generic.List<int> { categoryId.Value };
+                
+                var subCategoryIds = await _context.Categories
+                    .Where(c => c.ParentId == categoryId.Value)
+                    .Select(c => c.Id)
+                    .ToListAsync();
+                categoryIds.AddRange(subCategoryIds);
+
+                productsQuery = productsQuery.Where(p => p.CategoryId.HasValue && categoryIds.Contains(p.CategoryId.Value));
+            }
+
+            var products = await productsQuery.ToListAsync();
 
             // Sắp xếp lại theo đúng thứ tự của recommendedIds từ Python
             var sortedProducts = products

@@ -40,7 +40,7 @@ public class NotificationController : ControllerBase
         
         foreach(var adminId in adminIds)
         {
-            await _notificationService.SendNotificationAsync(adminId, title, message, "System");
+            await _notificationService.SendNotificationAsync(adminId, title, message, "System", request.RelatedId);
         }
         
         return Ok(new { success = true });
@@ -103,4 +103,5 @@ public class NotifyAdminRequest
 {
     public string ActionCode { get; set; }
     public string Details { get; set; }
+    public string? RelatedId { get; set; }
 }

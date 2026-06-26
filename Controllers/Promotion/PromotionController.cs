@@ -10,9 +10,10 @@ namespace BE_ECOMMERCE.Controllers.Promotion;
 
 [Route("api/[controller]")]
 [ApiController]
-public class PromotionController(ApplicationDbContext context) : ControllerBase
+public class PromotionController(ApplicationDbContext context, BE_ECOMMERCE.Services.CloudinaryService cloudinaryService) : ControllerBase
 {
     private readonly ApplicationDbContext _context = context;
+    private readonly BE_ECOMMERCE.Services.CloudinaryService _cloudinaryService = cloudinaryService;
 
     // Lấy các Promotion ĐANG HOẠT ĐỘNG (Dành cho trang chủ)
     [HttpGet("active")]
@@ -23,6 +24,19 @@ public class PromotionController(ApplicationDbContext context) : ControllerBase
             .Where(p => p.IsActived && p.StartDate <= today && p.EndDate >= today)
             .OrderByDescending(p => p.StartDate)
             .ToListAsync();
+
+        if (User.Identity != null && User.Identity.IsAuthenticated)
+        {
+            string userIdStr = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+            if (!string.IsNullOrEmpty(userIdStr) && Guid.TryParse(userIdStr, out Guid userId))
+            {
+                bool hasOrdered = await _context.Orders.AnyAsync(o => o.UserId == userId);
+                if (hasOrdered)
+                {
+                    return Ok(new List<BE_ECOMMERCE.Entities.Promotion.Promotion>());
+                }
+            }
+        }
 
         return Ok(activePromotions);
     }
@@ -39,8 +53,19 @@ public class PromotionController(ApplicationDbContext context) : ControllerBase
     public async Task<IActionResult> CreatePromotion([FromBody] BE_ECOMMERCE.Entities.Promotion.Promotion promotion)
     {
         _context.Promotions.Add(promotion);
-        await _context.SaveChangesAsync();
-        return Ok(promotion);
+        try
+        {
+            await _context.SaveChangesAsync();
+            return Ok(promotion);
+        }
+        catch (Exception ex)
+        {
+            if (!string.IsNullOrEmpty(promotion.ImageUrl))
+            {
+                await _cloudinaryService.DeleteBannerImageAsync(promotion.ImageUrl);
+            }
+            return StatusCode(500, new { message = "Lỗi hệ thống khi tạo khuyến mãi." });
+        }
     }
 
     [HttpPut("{id}")]
@@ -48,6 +73,9 @@ public class PromotionController(ApplicationDbContext context) : ControllerBase
     {
         var existing = await _context.Promotions.FindAsync(id);
         if (existing == null) return NotFound("Không tìm thấy khuyến mãi");
+
+        string? oldImageUrl = existing.ImageUrl;
+        bool isImageChanged = !string.IsNullOrEmpty(oldImageUrl) && oldImageUrl != promotion.ImageUrl;
 
         existing.Title = promotion.Title;
         existing.Description = promotion.Description;
@@ -58,8 +86,32 @@ public class PromotionController(ApplicationDbContext context) : ControllerBase
         existing.EndDate = promotion.EndDate;
         existing.IsActived = promotion.IsActived;
 
-        await _context.SaveChangesAsync();
-        return Ok(existing);
+        try
+        {
+            await _context.SaveChangesAsync();
+
+            if (isImageChanged)
+            {
+                try
+                {
+                    await _cloudinaryService.DeleteBannerImageAsync(oldImageUrl);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Lỗi xóa ảnh cũ Cloudinary: {ex.Message}");
+                }
+            }
+
+            return Ok(existing);
+        }
+        catch (Exception ex)
+        {
+            if (isImageChanged && !string.IsNullOrEmpty(promotion.ImageUrl))
+            {
+                await _cloudinaryService.DeleteBannerImageAsync(promotion.ImageUrl);
+            }
+            return StatusCode(500, new { message = "Lỗi hệ thống khi cập nhật khuyến mãi." });
+        }
     }
 
     [HttpDelete("{id}")]
@@ -68,8 +120,23 @@ public class PromotionController(ApplicationDbContext context) : ControllerBase
         var promotion = await _context.Promotions.FindAsync(id);
         if (promotion == null) return NotFound("Không tìm thấy khuyến mãi");
 
+        string? imageUrlToDelete = promotion.ImageUrl;
+
         _context.Promotions.Remove(promotion);
         await _context.SaveChangesAsync();
+
+        if (!string.IsNullOrEmpty(imageUrlToDelete))
+        {
+            try
+            {
+                await _cloudinaryService.DeleteBannerImageAsync(imageUrlToDelete);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Lỗi xóa ảnh cũ Cloudinary: {ex.Message}");
+            }
+        }
+
         return Ok(new { message = "Xóa khuyến mãi thành công" });
     }
 }

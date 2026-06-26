@@ -23,9 +23,9 @@ public class AiChatService
         _httpClient = httpClient;
     }
 
-    public async Task<string> AskAiAsync(Guid userId, string userMessage, string? sharedProductId = null)
+    public async Task<string> AskAiAsync(Guid userId, string userMessage, string? sharedProductId = null, string? imageName = null, System.Collections.Generic.List<BE_ECOMMERCE.Controllers.AiChatController.ChatMessageHistory>? history = null)
     {
-        if (string.IsNullOrEmpty(_apiKey) || _apiKey == "YOUR_GEMINI_API_KEY_HERE")
+        if (string.IsNullOrEmpty(_apiKey))
         {
             return "Hệ thống AI chưa được cấu hình API Key. Vui lòng liên hệ Admin.";
         }
@@ -198,16 +198,69 @@ YÊU CẦU:
 - Nếu khách hỏi tìm sản phẩm theo danh mục, hãy tư vấn dựa trên danh mục và các sản phẩm nổi bật có trong dữ liệu.
 - Hãy chủ động nhắc đến các Voucher hoặc Promotion nếu nó có vẻ phù hợp để khuyến khích khách hàng mua sắm.";
 
-        // 3. Gọi Gemini API (Google Generative AI REST API)
-        string url = $"https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key={_apiKey}";
+        string url = $"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={_apiKey}";
+
+        // Tải ảnh từ Cloudinary nếu có
+        string? base64Image = null;
+        string? mimeType = null;
+        if (!string.IsNullOrEmpty(imageName))
+        {
+            try
+            {
+                string imageUrl = $"https://res.cloudinary.com/dss8hptah/image/upload/images/messages/{imageName}";
+                var imgBytes = await _httpClient.GetByteArrayAsync(imageUrl);
+                base64Image = Convert.ToBase64String(imgBytes);
+                mimeType = "image/jpeg";
+                if (imageName.EndsWith(".png", StringComparison.OrdinalIgnoreCase)) mimeType = "image/png";
+                else if (imageName.EndsWith(".webp", StringComparison.OrdinalIgnoreCase)) mimeType = "image/webp";
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("Lỗi tải ảnh từ Cloudinary cho AI: " + ex.Message);
+            }
+        }
+
+        var contentsList = new System.Collections.Generic.List<object>();
+
+        if (history != null && history.Any())
+        {
+            foreach (var h in history)
+            {
+                contentsList.Add(new
+                {
+                    role = h.Role,
+                    parts = new[] { new { text = h.Text } }
+                });
+            }
+        }
+
+        var userParts = new System.Collections.Generic.List<object>
+        {
+            new { text = userMessage }
+        };
+
+        if (!string.IsNullOrEmpty(base64Image))
+        {
+            userParts.Add(new
+            {
+                inline_data = new
+                {
+                    mime_type = mimeType,
+                    data = base64Image
+                }
+            });
+        }
+
+        contentsList.Add(new
+        {
+            role = "user",
+            parts = userParts.ToArray()
+        });
 
         var payload = new
         {
-            system_instruction = new { parts = new { text = systemPrompt } },
-            contents = new[]
-            {
-                new { parts = new[] { new { text = userMessage } } }
-            }
+            system_instruction = new { parts = new[] { new { text = systemPrompt } } },
+            contents = contentsList
         };
 
         var content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
@@ -217,7 +270,7 @@ YÊU CẦU:
         {
             var err = await response.Content.ReadAsStringAsync();
             Console.WriteLine("Gemini API Error: " + err);
-            return "Xin lỗi, hệ thống AI đang gặp sự cố. Vui lòng thử lại sau.";
+            return "Xin lỗi, hệ thống AI đang gặp sự cố. Chi tiết lỗi: " + err;
         }
 
         var jsonStr = await response.Content.ReadAsStringAsync();

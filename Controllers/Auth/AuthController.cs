@@ -115,6 +115,7 @@ public class AuthController(ApplicationDbContext context, IConfiguration config)
             UserId = Guid.NewGuid(), // Tự sinh ID ngay ở code
             UserName = request.UserName,
             Email = request.Email,
+            PhoneNumber = request.PhoneNumber,
             PasswordHash = hashedPassword, // Lưu chuỗi loằng ngoằng này vào Database!
             GoogleId = null // Đăng ký tay thì không có GoogleId
         };

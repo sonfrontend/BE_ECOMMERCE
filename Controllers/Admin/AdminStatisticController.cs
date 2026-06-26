@@ -120,6 +120,7 @@ public class AdminStatisticController(ApplicationDbContext context) : Controller
 
             // Sản phẩm được mua nhiều nhất
             var topSellingProductObj = await _context.Products
+                .Where(p => p.SoldQuantity > 0)
                 .OrderByDescending(p => p.SoldQuantity)
                 .FirstOrDefaultAsync();
             var topSellingProduct = topSellingProductObj != null ? topSellingProductObj.ProductName : "Chưa có dữ liệu";
@@ -165,6 +166,35 @@ public class AdminStatisticController(ApplicationDbContext context) : Controller
                 .ToListAsync();
 
             return Ok(lowStockVariants);
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, $"Lỗi hệ thống: {ex.Message}");
+        }
+    }
+
+    [HttpGet("lost-products")]
+    public async Task<IActionResult> GetLostProducts()
+    {
+        try
+        {
+            var lostProducts = await _context.OrderItems
+                .Include(oi => oi.Order)
+                .Include(oi => oi.ProductVariant)
+                    .ThenInclude(v => v.Product)
+                .Where(oi => oi.Order.Status == OrderStatus.Lost)
+                .Select(oi => new
+                {
+                    orderId = oi.OrderId,
+                    orderDate = oi.Order.OrderDate,
+                    productName = oi.ProductVariant.Product.ProductName + " - " + oi.ProductVariant.Color + " (" + oi.ProductVariant.Size + ")",
+                    quantity = oi.Quantity,
+                    price = oi.UnitPrice,
+                    total = oi.Quantity * oi.UnitPrice
+                })
+                .ToListAsync();
+
+            return Ok(lostProducts);
         }
         catch (Exception ex)
         {

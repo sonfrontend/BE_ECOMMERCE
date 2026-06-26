@@ -46,3 +46,10 @@ Thumbs.db
 
 serviceAccountKey.json
 description.md
+
+test_gemini.py
+test_list_models.py
+test_vnpay.js
+test.jpg
+delete_products.py
+payload.json

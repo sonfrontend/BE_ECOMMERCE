@@ -9,6 +9,8 @@ using System.Linq;
 using System.Threading.Tasks;
 using System.Collections.Generic;
 
+using BE_ECOMMERCE.Services;
+
 namespace BE_ECOMMERCE.Controllers.Admin;
 
 public class AdminVariantDto
@@ -35,12 +37,13 @@ public class AdminProductDto
 
 [Route("api/[controller]")]
 [ApiController]
-public class AdminProductController(ApplicationDbContext context) : ControllerBase
+public class AdminProductController(ApplicationDbContext context, CloudinaryService cloudinaryService) : ControllerBase
 {
     private readonly ApplicationDbContext _context = context;
+    private readonly CloudinaryService _cloudinaryService = cloudinaryService;
 
     [HttpGet]
-    public async Task<IActionResult> GetProducts([FromQuery] int page = 1, [FromQuery] int pageSize = 10)
+    public async Task<IActionResult> GetProducts([FromQuery] int page = 1, [FromQuery] int pageSize = 10, [FromQuery] string search = null)
     {
         try
         {
@@ -48,6 +51,11 @@ public class AdminProductController(ApplicationDbContext context) : ControllerBa
                 .Include(p => p.Categories)
                 .Include(p => p.ProductVariants)
                 .AsQueryable();
+
+            if (!string.IsNullOrEmpty(search))
+            {
+                query = query.Where(p => p.ProductName.Contains(search) || p.ProductId.Contains(search));
+            }
                 
             var totalCount = await query.CountAsync();
             var items = await query
@@ -134,9 +142,33 @@ public class AdminProductController(ApplicationDbContext context) : ControllerBa
             await transaction.CommitAsync();
             return Ok(new { message = "Thêm sản phẩm thành công" });
         }
+        catch (DbUpdateException ex)
+        {
+            await transaction.RollbackAsync();
+
+            var innerMsg = ex.InnerException != null ? ex.InnerException.Message : ex.Message;
+            return BadRequest(new { message = $"Lỗi cập nhật DB: {innerMsg}" });
+        }
         catch (Exception ex)
         {
             await transaction.RollbackAsync();
+
+            // Dọn rác: Xóa ảnh đã upload nếu lưu DB thất bại
+            if (!string.IsNullOrEmpty(request.ImageUrl))
+            {
+                await _cloudinaryService.DeleteImageAsync(request.ImageUrl);
+            }
+            if (request.Variants != null)
+            {
+                foreach (var variant in request.Variants)
+                {
+                    if (!string.IsNullOrEmpty(variant.ImageUrl))
+                    {
+                        await _cloudinaryService.DeleteImageAsync(variant.ImageUrl);
+                    }
+                }
+            }
+
             return StatusCode(500, $"Lỗi hệ thống: {ex.Message}");
         }
     }
@@ -144,6 +176,9 @@ public class AdminProductController(ApplicationDbContext context) : ControllerBa
     [HttpPut("{articleId}")]
     public async Task<IActionResult> UpdateProduct(string articleId, [FromBody] AdminProductDto request)
     {
+        var oldImagesToDelete = new List<string>();
+        var newImagesUploaded = new List<string>();
+
         using var transaction = await _context.Database.BeginTransactionAsync();
         try
         {
@@ -151,6 +186,12 @@ public class AdminProductController(ApplicationDbContext context) : ControllerBa
                 .FirstOrDefaultAsync(p => p.ProductId == articleId);
 
             if (product == null) return NotFound("Sản phẩm không tồn tại");
+
+            if (product.ImageUrl != request.ImageUrl)
+            {
+                if (!string.IsNullOrEmpty(product.ImageUrl)) oldImagesToDelete.Add(product.ImageUrl);
+                if (!string.IsNullOrEmpty(request.ImageUrl)) newImagesUploaded.Add(request.ImageUrl);
+            }
 
             product.ProductName = request.ProductName;
             product.CategoryId = request.CategoryId;
@@ -165,6 +206,12 @@ public class AdminProductController(ApplicationDbContext context) : ControllerBa
                 // Xóa các variant không còn tồn tại
                 var incomingVariantIds = request.Variants.Where(v => v.VariantId > 0).Select(v => v.VariantId).ToList();
                 var variantsToRemove = existingVariants.Where(v => !incomingVariantIds.Contains(v.VariantId)).ToList();
+                
+                foreach (var removedVariant in variantsToRemove)
+                {
+                    if (!string.IsNullOrEmpty(removedVariant.ImageUrl)) oldImagesToDelete.Add(removedVariant.ImageUrl);
+                }
+
                 _context.ProductVariants.RemoveRange(variantsToRemove);
 
                 // Cập nhật và thêm mới
@@ -175,6 +222,12 @@ public class AdminProductController(ApplicationDbContext context) : ControllerBa
                         var existing = existingVariants.FirstOrDefault(pv => pv.VariantId == v.VariantId);
                         if (existing != null)
                         {
+                            if (existing.ImageUrl != v.ImageUrl)
+                            {
+                                if (!string.IsNullOrEmpty(existing.ImageUrl)) oldImagesToDelete.Add(existing.ImageUrl);
+                                if (!string.IsNullOrEmpty(v.ImageUrl)) newImagesUploaded.Add(v.ImageUrl);
+                            }
+
                             existing.SKU = v.SKU;
                             existing.Color = v.Color;
                             existing.Size = v.Size;
@@ -187,6 +240,8 @@ public class AdminProductController(ApplicationDbContext context) : ControllerBa
                     }
                     else
                     {
+                        if (!string.IsNullOrEmpty(v.ImageUrl)) newImagesUploaded.Add(v.ImageUrl);
+
                         _context.ProductVariants.Add(new VariantEntity
                         {
                             ProductId = product.ProductId,
@@ -206,12 +261,32 @@ public class AdminProductController(ApplicationDbContext context) : ControllerBa
 
             await _context.SaveChangesAsync();
             await transaction.CommitAsync();
-            return Ok(new { message = "Cập nhật thành công" });
+
+            // Dọn rác: Xóa ảnh cũ trên cloud khi lưu DB thành công
+            foreach (var oldImage in oldImagesToDelete)
+            {
+                await _cloudinaryService.DeleteImageAsync(oldImage, "images");
+            }
+
+            return Ok(new { message = "Cập nhật sản phẩm thành công" });
+        }
+        catch (Microsoft.EntityFrameworkCore.DbUpdateException ex)
+        {
+            await transaction.RollbackAsync();
+            var innerMsg = ex.InnerException != null ? ex.InnerException.Message : ex.Message;
+            return BadRequest(new { message = $"Lỗi cập nhật DB: {innerMsg}" });
         }
         catch (Exception ex)
         {
             await transaction.RollbackAsync();
-            return StatusCode(500, $"Lỗi hệ thống: {ex.Message}");
+
+            // Dọn rác: Xóa ảnh mới vừa upload nếu lưu DB thất bại
+            foreach (var newImage in newImagesUploaded)
+            {
+                await _cloudinaryService.DeleteImageAsync(newImage);
+            }
+
+            return StatusCode(500, new { message = "Lỗi hệ thống: " + ex.Message });
         }
     }
 
@@ -224,10 +299,32 @@ public class AdminProductController(ApplicationDbContext context) : ControllerBa
         if (product == null) return NotFound("Sản phẩm không tồn tại");
 
         var variants = await _context.ProductVariants.Where(v => v.ProductId == product.ProductId).ToListAsync();
+        
+        // Thu thập các link ảnh cần xóa
+        var imagesToDelete = new List<string>();
+        if (!string.IsNullOrEmpty(product.ImageUrl)) imagesToDelete.Add(product.ImageUrl);
+        
+        foreach (var variant in variants)
+        {
+            if (!string.IsNullOrEmpty(variant.ImageUrl)) imagesToDelete.Add(variant.ImageUrl);
+        }
+
         _context.ProductVariants.RemoveRange(variants);
         _context.Products.Remove(product);
         
         await _context.SaveChangesAsync();
+
+        // Chỉ xóa trên Cloudinary nếu thao tác DB thành công
+        foreach (var imgUrl in imagesToDelete.Distinct())
+        {
+            try
+            {
+                // Mặc định thư mục "images" cho product
+                await _cloudinaryService.DeleteImageAsync(imgUrl, "images"); 
+            }
+            catch { }
+        }
+
         return Ok(new { message = "Xóa sản phẩm thành công" });
     }
 }

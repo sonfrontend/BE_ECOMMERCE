@@ -30,7 +30,11 @@ public class UserController(ApplicationDbContext context, IConfiguration config)
                 u.UserName,
                 u.FullName,
                 u.Email,
-                u.PhoneNumber
+                u.PhoneNumber,
+                Role = _context.UserRoles
+                        .Where(ur => ur.UserId == u.UserId)
+                        .Join(_context.Roles, ur => ur.RoleId, r => r.RoleId, (ur, r) => r.RoleName)
+                        .FirstOrDefault() ?? "Người dùng"
             })
             .ToListAsync();
         return Ok(users);
