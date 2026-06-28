@@ -19,7 +19,7 @@ public class AiChatService
     public AiChatService(ApplicationDbContext context, IConfiguration config, HttpClient httpClient)
     {
         _context = context;
-        _apiKey = config["GeminiApiKey"];
+        _apiKey = config["Gemini:ApiKey"];
         _httpClient = httpClient;
     }
 
@@ -198,7 +198,7 @@ YÊU CẦU:
 - Nếu khách hỏi tìm sản phẩm theo danh mục, hãy tư vấn dựa trên danh mục và các sản phẩm nổi bật có trong dữ liệu.
 - Hãy chủ động nhắc đến các Voucher hoặc Promotion nếu nó có vẻ phù hợp để khuyến khích khách hàng mua sắm.";
 
-        string url = $"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={_apiKey}";
+        string url = $"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={_apiKey}";
 
         // Tải ảnh từ Cloudinary nếu có
         string? base64Image = null;
@@ -264,7 +264,8 @@ YÊU CẦU:
         };
 
         var content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
-        var response = await _httpClient.PostAsync(url, content);
+        using var client = new HttpClient();
+        var response = await client.PostAsync(url, content);
 
         if (!response.IsSuccessStatusCode)
         {

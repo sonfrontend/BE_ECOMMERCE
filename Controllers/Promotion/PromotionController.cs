@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using System;
 using System.Linq;
+using System.Security.Claims;
 using System.Threading.Tasks;
 
 namespace BE_ECOMMERCE.Controllers.Promotion;
@@ -25,18 +26,24 @@ public class PromotionController(ApplicationDbContext context, BE_ECOMMERCE.Serv
             .OrderByDescending(p => p.StartDate)
             .ToListAsync();
 
-        if (User.Identity != null && User.Identity.IsAuthenticated)
-        {
-            string userIdStr = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
-            if (!string.IsNullOrEmpty(userIdStr) && Guid.TryParse(userIdStr, out Guid userId))
-            {
-                bool hasOrdered = await _context.Orders.AnyAsync(o => o.UserId == userId);
-                if (hasOrdered)
-                {
-                    return Ok(new List<BE_ECOMMERCE.Entities.Promotion.Promotion>());
-                }
-            }
-        }
+
+        return Ok(activePromotions);
+    }
+
+    [HttpGet("available-for-user")]
+    [Microsoft.AspNetCore.Authorization.Authorize]
+    public async Task<IActionResult> GetAvailablePromotionsForUser()
+    {
+        var userIdStr = User.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier);
+        if (string.IsNullOrEmpty(userIdStr) || !Guid.TryParse(userIdStr, out var userId))
+            return Unauthorized();
+
+        var today = DateTime.UtcNow;
+        var activePromotions = await _context.Promotions
+            .Where(p => p.IsActived && p.StartDate <= today && p.EndDate >= today)
+            .Where(p => !_context.UserPromotions.Any(up => up.PromotionId == p.Id && up.UserId == userId && up.IsUsed))
+            .OrderByDescending(p => p.StartDate)
+            .ToListAsync();
 
         return Ok(activePromotions);
     }

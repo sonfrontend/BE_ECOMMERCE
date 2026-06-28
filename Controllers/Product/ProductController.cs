@@ -40,8 +40,10 @@ public class ProductController(ApplicationDbContext context, IConfiguration conf
             if (response.IsSuccessStatusCode)
             {
                 var recommendedIds = await response.Content.ReadFromJsonAsync<List<string>>();
-                if (recommendedIds != null && recommendedIds.Any())
+                if (recommendedIds != null)
                 {
+                    if (!recommendedIds.Any()) return Ok(new List<object>());
+
                     // Map IDs to actual product data
                     var products = await _context.Products
                         .Where(p => recommendedIds.Contains(p.ProductId))
@@ -91,8 +93,10 @@ public class ProductController(ApplicationDbContext context, IConfiguration conf
             if (response.IsSuccessStatusCode)
             {
                 var recommendedIds = await response.Content.ReadFromJsonAsync<List<string>>();
-                if (recommendedIds != null && recommendedIds.Any())
+                if (recommendedIds != null)
                 {
+                    if (!recommendedIds.Any()) return Ok(new List<object>());
+
                     // Map IDs to actual product data
                     var products = await _context.Products
                         .Where(p => recommendedIds.Contains(p.ProductId))

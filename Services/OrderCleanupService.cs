@@ -74,11 +74,21 @@ namespace BE_ECOMMERCE.Services
 
                         if (deliveredOrdersToComplete.Any())
                         {
+                            var notificationService = scope.ServiceProvider.GetRequiredService<BE_ECOMMERCE.Services.Notification.INotificationService>();
+
                             foreach (var order in deliveredOrdersToComplete)
                             {
                                 order.Status = OrderStatus.Completed;
                                 order.IsPaid = true;
                                 _logger.LogInformation($"Auto-completed order {order.Id} after 3 days of delivery.");
+
+                                await notificationService.SendNotificationAsync(
+                                    order.UserId,
+                                    "Đơn hàng tự động hoàn thành",
+                                    $"Đơn hàng #{order.Id} đã tự động chuyển sang trạng thái Hoàn thành do quá 3 ngày kể từ khi giao hàng thành công. Cảm ơn bạn đã mua sắm!",
+                                    "OrderStatusChanged",
+                                    order.Id.ToString()
+                                );
                             }
 
                             await context.SaveChangesAsync(stoppingToken);

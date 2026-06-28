@@ -122,28 +122,7 @@ public class AuthController(ApplicationDbContext context, IConfiguration config)
 
         _ = _context.Users.Add(newUser);
 
-        // Tạo 2 Voucher chào mừng cho User mới
-        var welcomeVoucher1 = await _context.Vouchers.FirstOrDefaultAsync(v => v.Code == "WELCOME10K");
-        var welcomeVoucher2 = await _context.Vouchers.FirstOrDefaultAsync(v => v.Code == "SUMMER20K");
 
-        if (welcomeVoucher1 != null)
-        {
-            _context.UserVouchers.Add(new BE_ECOMMERCE.Entities.Promotion.UserVoucher
-            {
-                UserId = newUser.UserId,
-                VoucherId = welcomeVoucher1.Id,
-                IsUsed = false
-            });
-        }
-        if (welcomeVoucher2 != null)
-        {
-            _context.UserVouchers.Add(new BE_ECOMMERCE.Entities.Promotion.UserVoucher
-            {
-                UserId = newUser.UserId,
-                VoucherId = welcomeVoucher2.Id,
-                IsUsed = false
-            });
-        }
 
         _ = await _context.SaveChangesAsync();
 
@@ -225,28 +204,7 @@ public class AuthController(ApplicationDbContext context, IConfiguration config)
                 user.RefreshToken = newRefreshToken;
                 user.RefreshTokenExpiryTime = DateTime.UtcNow.AddDays(7);
 
-                // Tạo 2 Voucher chào mừng cho User mới
-                var welcomeVoucher1 = await _context.Vouchers.FirstOrDefaultAsync(v => v.Code == "WELCOME10K");
-                var welcomeVoucher2 = await _context.Vouchers.FirstOrDefaultAsync(v => v.Code == "SUMMER20K");
 
-                if (welcomeVoucher1 != null)
-                {
-                    _context.UserVouchers.Add(new BE_ECOMMERCE.Entities.Promotion.UserVoucher
-                    {
-                        UserId = user.UserId,
-                        VoucherId = welcomeVoucher1.Id,
-                        IsUsed = false
-                    });
-                }
-                if (welcomeVoucher2 != null)
-                {
-                    _context.UserVouchers.Add(new BE_ECOMMERCE.Entities.Promotion.UserVoucher
-                    {
-                        UserId = user.UserId,
-                        VoucherId = welcomeVoucher2.Id,
-                        IsUsed = false
-                    });
-                }
 
                 _ = await _context.SaveChangesAsync();
 

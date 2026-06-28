@@ -43,7 +43,6 @@ public class OrderController(ApplicationDbContext context, BE_ECOMMERCE.Services
         decimal totalAmount = 0; // Thay vì gán phí ship vào luôn, ta chỉ tính giá sản phẩm trước để áp mã giảm giá
 
         var orderItems = new List<OrderItem>();
-        var transactions = new List<Transaction>();
         var now = DateTime.Now;
 
         foreach (var item in cartItems)
@@ -76,19 +75,6 @@ public class OrderController(ApplicationDbContext context, BE_ECOMMERCE.Services
                 Quantity = item.Quantity,
                 UnitPrice = unitPrice
             });
-
-            // Ghi nhận transaction cho AI với mỗi số lượng mua
-            for (int i = 0; i < item.Quantity; i++)
-            {
-                transactions.Add(new Transaction
-                {
-                    TDat = now,
-                    CustomerId = userIdStr, // String UserId format expected by AI
-                    VariantId = item.VariantId,
-                    Price = (double)unitPrice,
-                    SalesChannelId = 2 // Online channel
-                });
-            }
 
             // Ghi nhận tương tác Purchase cho bảng UserInteractions
             _context.UserInteractions.Add(new BE_ECOMMERCE.Entities.UserInteraction
@@ -132,21 +118,17 @@ public class OrderController(ApplicationDbContext context, BE_ECOMMERCE.Services
         Entities.Promotion.Promotion? appliedPromotion = null;
         if (appliedVoucher == null)
         {
-            // Chỉ áp dụng Khuyến mãi toàn sàn cho đơn hàng ĐẦU TIÊN
-            bool hasOrdered = await _context.Orders.AnyAsync(o => o.UserId == userId);
-            if (!hasOrdered)
-            {
-                var activePromotion = await _context.Promotions
-                    .Where(p => p.IsActived && p.StartDate <= now && p.EndDate >= now)
-                    .Where(p => !_context.UserPromotions.Any(up => up.PromotionId == p.Id && up.UserId == userId && up.IsUsed))
-                    .OrderByDescending(p => p.StartDate)
-                    .FirstOrDefaultAsync();
+            // Mỗi user chỉ được sử dụng mỗi promotion 1 lần
+            var activePromotion = await _context.Promotions
+                .Where(p => p.IsActived && p.StartDate <= now && p.EndDate >= now)
+                .Where(p => !_context.UserPromotions.Any(up => up.PromotionId == p.Id && up.UserId == userId && up.IsUsed))
+                .OrderByDescending(p => p.StartDate)
+                .FirstOrDefaultAsync();
 
-                if (activePromotion != null)
-                {
-                    discountAmount = totalAmount * (activePromotion.DiscountPercentage / 100m);
-                    appliedPromotion = activePromotion;
-                }
+            if (activePromotion != null)
+            {
+                discountAmount = totalAmount * (activePromotion.DiscountPercentage / 100m);
+                appliedPromotion = activePromotion;
             }
         }
 
@@ -173,7 +155,6 @@ public class OrderController(ApplicationDbContext context, BE_ECOMMERCE.Services
         };
 
         _context.Orders.Add(order);
-        _context.Transactions.AddRange(transactions);
         _context.CartItems.RemoveRange(cartItems);
 
         await _context.SaveChangesAsync();

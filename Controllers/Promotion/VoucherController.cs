@@ -134,12 +134,11 @@ namespace BE_ECOMMERCE.Controllers.Promotion
                 return BadRequest("Bạn đã lưu mã giảm giá này rồi.");
             }
 
-            if (template.Quantity <= 0)
+            int assignedCount = await _context.UserVouchers.CountAsync(uv => uv.VoucherId == templateId);
+            if (template.Quantity - assignedCount <= 0)
             {
                 return BadRequest("Mã giảm giá này đã được phát hết.");
             }
-
-            template.Quantity -= 1;
 
             var userVoucher = new UserVoucher
             {
@@ -245,10 +244,10 @@ namespace BE_ECOMMERCE.Controllers.Promotion
                 v.IsActived,
                 v.CreatedAt,
                 v.UpdatedAt,
-                Quantity = v.Quantity, // Keep it for compatibility (remaining quantity)
-                RemainingQuantity = v.Quantity,
+                Quantity = v.Quantity, // Total Quantity
+                RemainingQuantity = v.Quantity - (assignedCounts.ContainsKey(v.Id) ? assignedCounts[v.Id] : 0),
                 GivenQuantity = assignedCounts.ContainsKey(v.Id) ? assignedCounts[v.Id] : 0,
-                TotalQuantity = v.Quantity + (assignedCounts.ContainsKey(v.Id) ? assignedCounts[v.Id] : 0)
+                TotalQuantity = v.Quantity
             });
 
             return Ok(result);
@@ -290,6 +289,12 @@ namespace BE_ECOMMERCE.Controllers.Promotion
             voucher.Code = model.Code.ToUpper();
             voucher.DiscountValue = model.DiscountValue;
             voucher.MinOrderValue = model.MinOrderValue;
+
+            int assignedCount = await _context.UserVouchers.CountAsync(uv => uv.VoucherId == id);
+            if (model.Quantity < assignedCount)
+            {
+                return BadRequest("Số lượng tổng phát hành không thể nhỏ hơn số lượng đã được cấp phát.");
+            }
             voucher.Quantity = model.Quantity;
             voucher.StartDate = model.StartDate;
             voucher.EndDate = model.EndDate;
@@ -345,9 +350,8 @@ namespace BE_ECOMMERCE.Controllers.Promotion
 
             if (existingUserVoucher != null) return BadRequest("Người dùng này đã sở hữu Voucher này.");
 
-            if (template.Quantity <= 0) return BadRequest("Voucher này đã được phát hết.");
-
-            template.Quantity -= 1;
+            int assignedCount = await _context.UserVouchers.CountAsync(uv => uv.VoucherId == id);
+            if (template.Quantity - assignedCount <= 0) return BadRequest("Voucher này đã được phát hết.");
 
             var userVoucher = new UserVoucher
             {
@@ -374,11 +378,6 @@ namespace BE_ECOMMERCE.Controllers.Promotion
             if (userVoucher == null) return NotFound("Người dùng này không có Voucher này.");
 
             if (userVoucher.IsUsed) return BadRequest("Không thể thu hồi vì Voucher đã được người dùng sử dụng.");
-
-            if (userVoucher.Voucher != null)
-            {
-                userVoucher.Voucher.Quantity += 1;
-            }
 
             _context.UserVouchers.Remove(userVoucher);
             await _context.SaveChangesAsync();
