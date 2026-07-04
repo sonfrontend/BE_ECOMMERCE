@@ -43,15 +43,15 @@ public class AiChatService
 
         if (recentOrders.Any())
         {
-            contextBuilder.AppendLine("THÔNG TIN ĐƠN HÀNG CỦA KHÁCH:");
+            contextBuilder.AppendLine("CUSTOMER'S ORDER INFORMATION:");
             foreach (var order in recentOrders)
             {
-                contextBuilder.AppendLine($"- Đơn hàng #{order.Id} đặt ngày {order.OrderDate:dd/MM/yyyy}: Trạng thái '{order.Status}', Tổng tiền: {order.TotalAmount:N0}đ");
+                contextBuilder.AppendLine($"- Order #{order.Id} placed on {order.OrderDate:dd/MM/yyyy}: Status '{order.Status}', Total amount: {order.TotalAmount:N0} VND");
             }
         }
         else
         {
-            contextBuilder.AppendLine("THÔNG TIN ĐƠN HÀNG CỦA KHÁCH: Khách hàng hiện chưa có đơn hàng nào trên hệ thống.");
+            contextBuilder.AppendLine("CUSTOMER'S ORDER INFORMATION: The customer currently has no orders in the system.");
         }
 
         // 1.1b Lấy thông tin giỏ hàng
@@ -63,37 +63,41 @@ public class AiChatService
 
         if (cartItems.Any())
         {
-            contextBuilder.AppendLine("THÔNG TIN GIỎ HÀNG CỦA KHÁCH:");
+            contextBuilder.AppendLine("CUSTOMER'S CART INFORMATION:");
             foreach (var item in cartItems)
             {
                 var p = item.ProductVariant.Product;
-                contextBuilder.AppendLine($"- Sản phẩm: {p.ProductName} (Size {item.ProductVariant.Size}, Màu {item.ProductVariant.Color}), Số lượng: {item.Quantity}, Giá: {item.ProductVariant.CurrentPrice:N0}đ");
+                contextBuilder.AppendLine($"- Product: {p.ProductName} (Size {item.ProductVariant.Size}, Color {item.ProductVariant.Color}), Quantity: {item.Quantity}, Price: {item.ProductVariant.CurrentPrice:N0} VND");
             }
         }
         else
         {
-            contextBuilder.AppendLine("THÔNG TIN GIỎ HÀNG CỦA KHÁCH: Giỏ hàng hiện đang trống.");
+            contextBuilder.AppendLine("CUSTOMER'S CART INFORMATION: The cart is currently empty.");
         }
 
         // 1.1c Lấy danh sách danh mục
         var categories = await _context.Categories.Where(c => c.IsActived).Select(c => new { c.Id, c.Name }).ToListAsync();
         if (categories.Any())
         {
-            contextBuilder.AppendLine("DANH MỤC SẢN PHẨM CỦA SHOP:");
+            contextBuilder.AppendLine("STORE'S PRODUCT CATEGORIES:");
             foreach (var c in categories)
             {
-                contextBuilder.AppendLine($"- {c.Name} (Mã: {c.Id})");
+                contextBuilder.AppendLine($"- {c.Name} (ID: {c.Id})");
             }
         }
 
-        // 1.1d Lấy danh sách Voucher đang hoạt động
-        var activeVouchers = await _context.Vouchers.Where(v => v.IsActived && v.EndDate >= DateTime.Now).ToListAsync();
+        // 1.1d Lấy danh sách Voucher của User đang hoạt động
+        var activeVouchers = await _context.UserVouchers
+            .Include(uv => uv.Voucher)
+            .Where(uv => uv.UserId == userId && !uv.IsUsed && uv.Voucher != null && uv.Voucher.IsActived && uv.Voucher.EndDate >= DateTime.Now)
+            .Select(uv => uv.Voucher)
+            .ToListAsync();
         if (activeVouchers.Any())
         {
-            contextBuilder.AppendLine("\nCÁC VOUCHER/KHUYẾN MÃI ĐANG CÓ:");
+            contextBuilder.AppendLine("\nCUSTOMER'S AVAILABLE VOUCHERS:");
             foreach (var v in activeVouchers)
             {
-                contextBuilder.AppendLine($"- Mã '{v.Code}': Giảm {v.DiscountValue:N0}đ, Đơn tối thiểu: {v.MinOrderValue:N0}đ, Hạn: {v.EndDate:dd/MM/yyyy}");
+                contextBuilder.AppendLine($"- Code '{v.Code}': Discount {v.DiscountValue:N0} VND, Min order: {v.MinOrderValue:N0} VND, Expires on: {v.EndDate:dd/MM/yyyy}");
             }
         }
 
@@ -101,10 +105,10 @@ public class AiChatService
         var activePromotions = await _context.Promotions.Where(p => p.IsActived && p.EndDate >= DateTime.Now).ToListAsync();
         if (activePromotions.Any())
         {
-            contextBuilder.AppendLine("\nCÁC CHƯƠNG TRÌNH PROMOTION (KHUYẾN MÃI LỚN):");
+            contextBuilder.AppendLine("\nACTIVE PROMOTIONS (MAJOR DISCOUNTS):");
             foreach (var p in activePromotions)
             {
-                contextBuilder.AppendLine($"- {p.Title}: {p.Description} (Giảm {p.DiscountPercentage:N0}%, Hạn: {p.EndDate:dd/MM/yyyy})");
+                contextBuilder.AppendLine($"- {p.Title}: {p.Description} (Discount {p.DiscountPercentage:N0}%, Expires on: {p.EndDate:dd/MM/yyyy})");
             }
         }
 
@@ -117,12 +121,12 @@ public class AiChatService
 
             if (product != null)
             {
-                contextBuilder.AppendLine($"\nTHÔNG TIN SẢN PHẨM KHÁCH ĐANG XEM (ID: {product.ProductId}, Tên: {product.ProductName}):");
-                contextBuilder.AppendLine($"- Giá bán: {product.ProductVariants.FirstOrDefault()?.CurrentPrice:N0}đ");
-                contextBuilder.AppendLine("- Tồn kho theo phân loại:");
+                contextBuilder.AppendLine($"\nINFORMATION OF THE PRODUCT THE CUSTOMER IS VIEWING (ID: {product.ProductId}, Name: {product.ProductName}):");
+                contextBuilder.AppendLine($"- Selling price: {product.ProductVariants.FirstOrDefault()?.CurrentPrice:N0} VND");
+                contextBuilder.AppendLine("- Inventory by variant:");
                 foreach (var variant in product.ProductVariants)
                 {
-                    contextBuilder.AppendLine($"  + Size {variant.Size}, Màu {variant.Color}: {(variant.StockQuantity > 0 ? $"Còn {variant.StockQuantity} cái" : "Hết hàng")}");
+                    contextBuilder.AppendLine($"  + Size {variant.Size}, Color {variant.Color}: {(variant.StockQuantity > 0 ? $"{variant.StockQuantity} in stock" : "Out of stock")}");
                 }
             }
         }
@@ -145,15 +149,15 @@ public class AiChatService
                     .Where(p => matchedIds.Contains(p.ProductId))
                     .ToListAsync();
 
-                contextBuilder.AppendLine("\nTHÔNG TIN SẢN PHẨM KHÁCH CÓ THỂ ĐANG HỎI:");
+                contextBuilder.AppendLine("\nPRODUCT INFORMATION THE CUSTOMER MIGHT BE ASKING ABOUT:");
                 foreach (var p in matchedProducts)
                 {
-                    contextBuilder.AppendLine($"- Tên: {p.ProductName} (Mã: {p.ProductId})");
-                    contextBuilder.AppendLine($"  + Giá: {p.ProductVariants.FirstOrDefault()?.CurrentPrice:N0}đ");
-                    contextBuilder.AppendLine("  + Tồn kho:");
+                    contextBuilder.AppendLine($"- Name: {p.ProductName} (ID: {p.ProductId})");
+                    contextBuilder.AppendLine($"  + Price: {p.ProductVariants.FirstOrDefault()?.CurrentPrice:N0} VND");
+                    contextBuilder.AppendLine("  + Inventory:");
                     foreach (var variant in p.ProductVariants)
                     {
-                        contextBuilder.AppendLine($"    * Size {variant.Size}, Màu {variant.Color}: {(variant.StockQuantity > 0 ? $"Còn {variant.StockQuantity} cái" : "Hết hàng")}");
+                        contextBuilder.AppendLine($"    * Size {variant.Size}, Color {variant.Color}: {(variant.StockQuantity > 0 ? $"{variant.StockQuantity} in stock" : "Out of stock")}");
                     }
                 }
             }
@@ -161,10 +165,10 @@ public class AiChatService
             {
                 // Lấy ngẫu nhiên vài sản phẩm nổi bật làm context
                 var popProducts = await _context.Products.Include(p => p.ProductVariants).Take(5).Select(p => new { p.ProductName, Price = p.ProductVariants.FirstOrDefault().CurrentPrice }).ToListAsync();
-                contextBuilder.AppendLine("\nMỘT SỐ SẢN PHẨM NỔI BẬT CỦA SHOP:");
+                contextBuilder.AppendLine("\nSOME FEATURED PRODUCTS FROM THE STORE:");
                 foreach (var p in popProducts)
                 {
-                    contextBuilder.AppendLine($"- {p.ProductName}: {p.Price:N0}đ");
+                    contextBuilder.AppendLine($"- {p.ProductName}: {p.Price:N0} VND");
                 }
             }
         }
@@ -181,22 +185,22 @@ public class AiChatService
         catch { }
 
         // 2. Tạo System Prompt ràng buộc
-        var systemPrompt = $@"Bạn là trợ lý ảo thân thiện của cửa hàng E-commerce. Nhiệm vụ duy nhất của bạn là hỗ trợ khách hàng về sản phẩm, tư vấn size, và kiểm tra đơn hàng.
-TỪ CHỐI mọi câu hỏi không liên quan đến mua sắm, cửa hàng, sản phẩm hoặc đơn hàng. Hãy nói: 'Tôi chỉ là trợ lý bán hàng, tôi không thể giúp bạn điều đó.'
-Dưới đây là thông tin lấy từ hệ thống để bạn trả lời khách (KHÔNG ĐƯỢC TỰ BỊA DATA):
+        var systemPrompt = $@"You are a friendly virtual assistant for an E-commerce store. Your sole task is to assist customers with products, size recommendations, and checking orders.
+DECLINE any questions unrelated to shopping, the store, products, or orders. Simply say: 'I am just a sales assistant, I cannot help you with that.'
+Below is the information retrieved from the system for you to answer the customer (DO NOT MAKE UP DATA):
 
 {contextBuilder.ToString()}
 
-BẢNG SIZE CỦA SHOP (Dùng để tư vấn nếu khách hỏi):
+STORE'S SIZE CHART (Use this for sizing recommendations if asked):
 {sizeChart}
 
-YÊU CẦU:
-- Trả lời ngắn gọn, lịch sự, bằng tiếng Việt.
-- Dùng thông tin đơn hàng/giỏ hàng/sản phẩm/danh mục/voucher/promotion ở trên để trả lời chính xác.
-- Nếu khách hỏi đơn hàng/giỏ hàng mà hệ thống báo trống, hãy trả lời đúng sự thật là giỏ hàng đang trống hoặc chưa có đơn hàng.
-- Nếu khách hỏi một mã sản phẩm cụ thể mà trong dữ liệu không có, hãy nói 'Dạ, tôi chưa tìm thấy thông tin sản phẩm này, bạn kiểm tra lại tên/mã nhé'.
-- Nếu khách hỏi tìm sản phẩm theo danh mục, hãy tư vấn dựa trên danh mục và các sản phẩm nổi bật có trong dữ liệu.
-- Hãy chủ động nhắc đến các Voucher hoặc Promotion nếu nó có vẻ phù hợp để khuyến khích khách hàng mua sắm.";
+REQUIREMENTS:
+- Answer concisely, politely, and in English.
+- Use the order/cart/product/category/voucher information above to provide accurate answers.
+- If the customer asks about an order/cart and the system says it is empty, state the truth that the cart is empty or there are no orders.
+- If the customer asks about a specific product code that is not in the data, say 'I could not find this product information, please double-check the name/code'.
+- If the customer asks to find a product by category, recommend based on the category and featured products in the data.
+- Proactively mention Vouchers or Promotions if they seem relevant to encourage the customer to shop.";
 
         string url = $"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={_apiKey}";
 
@@ -271,7 +275,7 @@ YÊU CẦU:
         {
             var err = await response.Content.ReadAsStringAsync();
             Console.WriteLine("Gemini API Error: " + err);
-            return "Xin lỗi, hệ thống AI đang gặp sự cố. Chi tiết lỗi: " + err;
+            return "Xin lỗi, hệ thống AI hiện đang quá tải hoặc gặp sự cố. Vui lòng thử lại sau ít phút.";
         }
 
         var jsonStr = await response.Content.ReadAsStringAsync();

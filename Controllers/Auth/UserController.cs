@@ -142,6 +142,14 @@ public class UserController(ApplicationDbContext context, IConfiguration config)
 
         if (string.IsNullOrEmpty(user.GoogleId) && !string.IsNullOrEmpty(request.Password))
         {
+            if (string.IsNullOrEmpty(request.OldPassword))
+            {
+                return BadRequest(new { message = "Vui lòng nhập mật khẩu cũ!" });
+            }
+            if (!BCrypt.Net.BCrypt.Verify(request.OldPassword, user.PasswordHash))
+            {
+                return BadRequest(new { message = "Mật khẩu cũ không chính xác!" });
+            }
             if (!Regex.IsMatch(request.Password, @"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)"))
             {
                 return BadRequest(new { message = "Mật khẩu phải bao gồm chữ hoa, chữ thường, số!" });

@@ -63,7 +63,7 @@ public class AdminProductController(ApplicationDbContext context, CloudinaryServ
                 .Take(pageSize)
                 .Select(p => new
                 {
-                    articleId = p.ProductId,
+                    productId = p.ProductId,
                     productName = p.ProductName,
                     categoryId = p.CategoryId,
                     categoryName = p.Categories != null ? p.Categories.Name : null,
@@ -173,8 +173,8 @@ public class AdminProductController(ApplicationDbContext context, CloudinaryServ
         }
     }
 
-    [HttpPut("{articleId}")]
-    public async Task<IActionResult> UpdateProduct(string articleId, [FromBody] AdminProductDto request)
+    [HttpPut("{productId}")]
+    public async Task<IActionResult> UpdateProduct(string productId, [FromBody] AdminProductDto request)
     {
         var oldImagesToDelete = new List<string>();
         var newImagesUploaded = new List<string>();
@@ -183,7 +183,7 @@ public class AdminProductController(ApplicationDbContext context, CloudinaryServ
         try
         {
             var product = await _context.Products
-                .FirstOrDefaultAsync(p => p.ProductId == articleId);
+                .FirstOrDefaultAsync(p => p.ProductId == productId);
 
             if (product == null) return NotFound("Sản phẩm không tồn tại");
 
@@ -290,11 +290,11 @@ public class AdminProductController(ApplicationDbContext context, CloudinaryServ
         }
     }
 
-    [HttpDelete("{articleId}")]
-    public async Task<IActionResult> DeleteProduct(string articleId)
+    [HttpDelete("{productId}")]
+    public async Task<IActionResult> DeleteProduct(string productId)
     {
         var product = await _context.Products
-            .FirstOrDefaultAsync(p => p.ProductId == articleId);
+            .FirstOrDefaultAsync(p => p.ProductId == productId);
 
         if (product == null) return NotFound("Sản phẩm không tồn tại");
 

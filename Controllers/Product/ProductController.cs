@@ -42,26 +42,40 @@ public class ProductController(ApplicationDbContext context, IConfiguration conf
                 var recommendedIds = await response.Content.ReadFromJsonAsync<List<string>>();
                 if (recommendedIds != null)
                 {
-                    if (!recommendedIds.Any()) return Ok(new List<object>());
+                    if (Guid.TryParse(userIdStr, out var userId))
+                    {
+                        var purchasedProductIds = await _context.UserInteractions
+                            .Where(i => i.UserId == userId && i.InteractionType == "PURCHASE")
+                            .Select(i => i.ProductId)
+                            .ToListAsync();
+
+                        recommendedIds = recommendedIds.Except(purchasedProductIds, StringComparer.OrdinalIgnoreCase).ToList();
+                    }
+
+                    if (!recommendedIds.Any()) return await GetFallbackRecommendations(Guid.TryParse(userIdStr, out var uId) ? uId : null);
 
                     // Map IDs to actual product data
                     var products = await _context.Products
                         .Where(p => recommendedIds.Contains(p.ProductId))
                         .Select(p => new
                         {
-                            articleId = p.ProductId,
+                            productId = p.ProductId,
                             productName = p.ProductName,
                             price = (p.DiscountPercentage > 0 && (p.DiscountEndDate == null || p.DiscountEndDate >= DateTime.Now)) ? _context.ProductVariants.Where(v => v.ProductId == p.ProductId).Select(v => v.CurrentPrice).FirstOrDefault() : _context.ProductVariants.Where(v => v.ProductId == p.ProductId).Select(v => v.OriginalPrice).FirstOrDefault(),
                             originalPrice = _context.ProductVariants.Where(v => v.ProductId == p.ProductId).Select(v => v.OriginalPrice).FirstOrDefault(),
                             discountPercentage = (p.DiscountPercentage > 0 && (p.DiscountEndDate == null || p.DiscountEndDate >= DateTime.Now)) ? p.DiscountPercentage : 0,
+                            discountEndDate = p.DiscountEndDate,
                             imageUrl = p.ImageUrl,
-                            soldQuantity = p.SoldQuantity
+                            soldQuantity = p.SoldQuantity,
+                            rating = _context.Reviews.Any(r => r.ProductId == p.ProductId) ? Math.Round(_context.Reviews.Where(r => r.ProductId == p.ProductId).Average(r => (double)r.Rating), 1) : 5.0,
+                            reviewsCount = _context.Reviews.Count(r => r.ProductId == p.ProductId),
+                            likesCount = _context.Favorites.Count(f => f.ProductId == p.ProductId)
                         })
                         .ToListAsync();
 
                     // Maintain the order returned by AI
                     var sortedProducts = recommendedIds
-                        .Select(id => products.FirstOrDefault(p => p.articleId == id))
+                        .Select(id => products.FirstOrDefault(p => p.productId == id))
                         .Where(p => p != null)
                         .ToList();
 
@@ -74,7 +88,7 @@ public class ProductController(ApplicationDbContext context, IConfiguration conf
             Console.WriteLine($"Error calling AI service: {ex.Message}");
         }
 
-        return await GetFallbackRecommendations();
+        return await GetFallbackRecommendations(Guid.TryParse(userIdStr, out var parsedId) ? parsedId : null);
     }
 
     [HttpGet("{id}/frequently-bought-together")]
@@ -97,19 +111,35 @@ public class ProductController(ApplicationDbContext context, IConfiguration conf
                 {
                     if (!recommendedIds.Any()) return Ok(new List<object>());
 
+                    var userIdStr = User.FindFirstValue(ClaimTypes.NameIdentifier);
+                    if (!string.IsNullOrEmpty(userIdStr) && Guid.TryParse(userIdStr, out var userId))
+                    {
+                        var purchasedProductIds = await _context.UserInteractions
+                            .Where(i => i.UserId == userId && i.InteractionType == "PURCHASE")
+                            .Select(i => i.ProductId)
+                            .ToListAsync();
+
+                        recommendedIds = recommendedIds.Except(purchasedProductIds, StringComparer.OrdinalIgnoreCase).ToList();
+                    }
+
+                    if (!recommendedIds.Any()) return Ok(new List<object>());
+
                     // Map IDs to actual product data
                     var products = await _context.Products
                         .Where(p => recommendedIds.Contains(p.ProductId))
                         .Select(p => new
                         {
-                            articleId = p.ProductId,
                             productId = p.ProductId,
                             productName = p.ProductName,
                             price = (p.DiscountPercentage > 0 && (p.DiscountEndDate == null || p.DiscountEndDate >= DateTime.Now)) ? _context.ProductVariants.Where(v => v.ProductId == p.ProductId).Select(v => v.CurrentPrice).FirstOrDefault() : _context.ProductVariants.Where(v => v.ProductId == p.ProductId).Select(v => v.OriginalPrice).FirstOrDefault(),
                             originalPrice = _context.ProductVariants.Where(v => v.ProductId == p.ProductId).Select(v => v.OriginalPrice).FirstOrDefault(),
                             discountPercentage = (p.DiscountPercentage > 0 && (p.DiscountEndDate == null || p.DiscountEndDate >= DateTime.Now)) ? p.DiscountPercentage : 0,
+                            discountEndDate = p.DiscountEndDate,
                             imageUrl = p.ImageUrl,
-                            soldQuantity = p.SoldQuantity
+                            soldQuantity = p.SoldQuantity,
+                            rating = _context.Reviews.Any(r => r.ProductId == p.ProductId) ? Math.Round(_context.Reviews.Where(r => r.ProductId == p.ProductId).Average(r => (double)r.Rating), 1) : 5.0,
+                            reviewsCount = _context.Reviews.Count(r => r.ProductId == p.ProductId),
+                            likesCount = _context.Favorites.Count(f => f.ProductId == p.ProductId)
                         })
                         .ToListAsync();
 
@@ -174,7 +204,7 @@ public class ProductController(ApplicationDbContext context, IConfiguration conf
 
     public class ByIdsRequest
     {
-        public List<string> ArticleIds { get; set; } = new List<string>();
+        public List<string> ProductIds { get; set; } = new List<string>();
         public string? SortPrice { get; set; }
     }
 
@@ -183,14 +213,15 @@ public class ProductController(ApplicationDbContext context, IConfiguration conf
     {
         try
         {
-            if (request.ArticleIds == null || !request.ArticleIds.Any())
+            if (request.ProductIds == null || !request.ProductIds.Any())
             {
                 return Ok(new { data = new List<object>() });
             }
 
             var query = _context.Products
                 .Include(p => p.ProductVariants)
-                .Where(p => request.ArticleIds.Contains(p.ProductId));
+                .Include(p => p.Categories)
+                .Where(p => request.ProductIds.Contains(p.ProductId));
 
             if (request.SortPrice == "asc")
             {
@@ -203,14 +234,20 @@ public class ProductController(ApplicationDbContext context, IConfiguration conf
 
             var products = await query.Select(p => new
             {
-                articleId = p.ProductId,
+                productId = p.ProductId,
                 productCode = p.ProductId,
                 productName = p.ProductName,
+                categoryId = p.CategoryId,
+                parentCategoryId = p.Categories != null ? p.Categories.ParentId : null,
                 price = (p.DiscountPercentage > 0 && (p.DiscountEndDate == null || p.DiscountEndDate >= DateTime.Now)) ? (p.ProductVariants.FirstOrDefault() != null ? p.ProductVariants.FirstOrDefault().CurrentPrice : 0) : (p.ProductVariants.FirstOrDefault() != null ? p.ProductVariants.FirstOrDefault().OriginalPrice : 0),
                 originalPrice = p.ProductVariants.FirstOrDefault() != null ? p.ProductVariants.FirstOrDefault().OriginalPrice : 0,
                 discountPercentage = (p.DiscountPercentage > 0 && (p.DiscountEndDate == null || p.DiscountEndDate >= DateTime.Now)) ? p.DiscountPercentage : 0,
+                            discountEndDate = p.DiscountEndDate,
                 imageUrl = string.IsNullOrEmpty(p.ImageUrl) ? (p.ProductVariants.FirstOrDefault() != null ? p.ProductVariants.FirstOrDefault().ImageUrl : "") : p.ImageUrl,
-                soldQuantity = p.SoldQuantity
+                soldQuantity = p.SoldQuantity,
+                rating = _context.Reviews.Any(r => r.ProductId == p.ProductId) ? Math.Round(_context.Reviews.Where(r => r.ProductId == p.ProductId).Average(r => (double)r.Rating), 1) : 5.0,
+                reviewsCount = _context.Reviews.Count(r => r.ProductId == p.ProductId),
+                likesCount = _context.Favorites.Count(f => f.ProductId == p.ProductId)
             }).ToListAsync();
 
             return Ok(new { data = products });
@@ -221,21 +258,32 @@ public class ProductController(ApplicationDbContext context, IConfiguration conf
         }
     }
 
-    private async Task<IActionResult> GetFallbackRecommendations()
+    private async Task<IActionResult> GetFallbackRecommendations(Guid? userId = null)
     {
-        var products = await _context.Products
+        var query = _context.Products.AsQueryable();
+
+        if (userId.HasValue)
+        {
+            query = query.Where(p => !_context.UserInteractions.Any(i => i.UserId == userId.Value && i.InteractionType == "PURCHASE" && i.ProductId == p.ProductId));
+        }
+
+        var products = await query
             .OrderByDescending(p => p.SoldQuantity) // Fallback: Best sellers
             .ThenByDescending(p => _context.Favorites.Count(f => f.ProductId == p.ProductId)) // Then by Most Favorites
             .Take(20)
             .Select(p => new
             {
-                articleId = p.ProductId,
+                productId = p.ProductId,
                 productName = p.ProductName,
                 price = (p.DiscountPercentage > 0 && (p.DiscountEndDate == null || p.DiscountEndDate >= DateTime.Now)) ? _context.ProductVariants.Where(v => v.ProductId == p.ProductId).Select(v => v.CurrentPrice).FirstOrDefault() : _context.ProductVariants.Where(v => v.ProductId == p.ProductId).Select(v => v.OriginalPrice).FirstOrDefault(),
                 originalPrice = _context.ProductVariants.Where(v => v.ProductId == p.ProductId).Select(v => v.OriginalPrice).FirstOrDefault(),
                 discountPercentage = (p.DiscountPercentage > 0 && (p.DiscountEndDate == null || p.DiscountEndDate >= DateTime.Now)) ? p.DiscountPercentage : 0,
+                            discountEndDate = p.DiscountEndDate,
                 imageUrl = p.ImageUrl,
-                soldQuantity = p.SoldQuantity
+                soldQuantity = p.SoldQuantity,
+                rating = _context.Reviews.Any(r => r.ProductId == p.ProductId) ? Math.Round(_context.Reviews.Where(r => r.ProductId == p.ProductId).Average(r => (double)r.Rating), 1) : 5.0,
+                reviewsCount = _context.Reviews.Count(r => r.ProductId == p.ProductId),
+                likesCount = _context.Favorites.Count(f => f.ProductId == p.ProductId)
             })
             .ToListAsync();
         return Ok(products);
@@ -260,7 +308,7 @@ public class ProductController(ApplicationDbContext context, IConfiguration conf
 
             return Ok(new
             {
-                articleId = product.ProductId,
+                productId = product.ProductId,
                 productCode = product.ProductId,
                 categoryId = product.CategoryId,
                 categoryName = product.Categories?.Name,
@@ -277,9 +325,10 @@ public class ProductController(ApplicationDbContext context, IConfiguration conf
                 size = firstVariant?.Size,
                 color = firstVariant?.Color,
                 stockQuantity = firstVariant != null ? firstVariant.StockQuantity : 0,
+                soldQuantity = product.SoldQuantity,
                 products = product.ProductVariants.Select(v => new
                 {
-                    articleId = product.ProductId,
+                    productId = product.ProductId,
                     variantId = v.VariantId,
                     size = v.Size,
                     color = v.Color,
@@ -320,10 +369,14 @@ public class ProductController(ApplicationDbContext context, IConfiguration conf
                     p.ProductName,
                     ImageUrl = string.IsNullOrEmpty(p.ImageUrl) ? (p.ProductVariants.FirstOrDefault() != null ? p.ProductVariants.FirstOrDefault().ImageUrl : "") : p.ImageUrl,
                     DiscountPercentage = (p.DiscountPercentage > 0 && (p.DiscountEndDate == null || p.DiscountEndDate >= DateTime.Now)) ? p.DiscountPercentage : 0,
+                    DiscountEndDate = p.DiscountEndDate,
                     OriginalPrice = p.ProductVariants.FirstOrDefault() != null ? p.ProductVariants.FirstOrDefault().OriginalPrice : 0,
                     CurrentPrice = (p.DiscountPercentage > 0 && (p.DiscountEndDate == null || p.DiscountEndDate >= DateTime.Now)) ? (p.ProductVariants.FirstOrDefault() != null ? p.ProductVariants.FirstOrDefault().CurrentPrice : 0) : (p.ProductVariants.FirstOrDefault() != null ? p.ProductVariants.FirstOrDefault().OriginalPrice : 0),
                     SoldQuantity = p.SoldQuantity,
-                    StockQuantity = p.ProductVariants.Sum(v => v.StockQuantity)
+                    StockQuantity = p.ProductVariants.Sum(v => v.StockQuantity),
+                    Rating = _context.Reviews.Any(r => r.ProductId == p.ProductId) ? Math.Round(_context.Reviews.Where(r => r.ProductId == p.ProductId).Average(r => (double)r.Rating), 1) : 5.0,
+                    ReviewsCount = _context.Reviews.Count(r => r.ProductId == p.ProductId),
+                    LikesCount = _context.Favorites.Count(f => f.ProductId == p.ProductId)
                 })
                 .ToListAsync();
 
@@ -464,10 +517,14 @@ public class ProductController(ApplicationDbContext context, IConfiguration conf
                     p.ProductName,
                     ImageUrl = string.IsNullOrEmpty(p.ImageUrl) ? (p.ProductVariants.FirstOrDefault() != null ? p.ProductVariants.FirstOrDefault().ImageUrl : "") : p.ImageUrl,
                     DiscountPercentage = (p.DiscountPercentage > 0 && (p.DiscountEndDate == null || p.DiscountEndDate >= DateTime.Now)) ? p.DiscountPercentage : 0,
+                    DiscountEndDate = p.DiscountEndDate,
                     OriginalPrice = p.ProductVariants.FirstOrDefault() != null ? p.ProductVariants.FirstOrDefault().OriginalPrice : 0,
                     CurrentPrice = (p.DiscountPercentage > 0 && (p.DiscountEndDate == null || p.DiscountEndDate >= DateTime.Now)) ? (p.ProductVariants.FirstOrDefault() != null ? p.ProductVariants.FirstOrDefault().CurrentPrice : 0) : (p.ProductVariants.FirstOrDefault() != null ? p.ProductVariants.FirstOrDefault().OriginalPrice : 0),
                     SoldQuantity = p.SoldQuantity,
-                    StockQuantity = p.ProductVariants.Sum(v => v.StockQuantity)
+                    StockQuantity = p.ProductVariants.Sum(v => v.StockQuantity),
+                    Rating = _context.Reviews.Any(r => r.ProductId == p.ProductId) ? Math.Round(_context.Reviews.Where(r => r.ProductId == p.ProductId).Average(r => (double)r.Rating), 1) : 5.0,
+                    ReviewsCount = _context.Reviews.Count(r => r.ProductId == p.ProductId),
+                    LikesCount = _context.Favorites.Count(f => f.ProductId == p.ProductId)
                 })
                 .ToListAsync();
 
@@ -579,10 +636,14 @@ public class ProductController(ApplicationDbContext context, IConfiguration conf
                     p.ProductName,
                     ImageUrl = string.IsNullOrEmpty(p.ImageUrl) ? (p.ProductVariants.FirstOrDefault() != null ? p.ProductVariants.FirstOrDefault().ImageUrl : "") : p.ImageUrl,
                     DiscountPercentage = (p.DiscountPercentage > 0 && (p.DiscountEndDate == null || p.DiscountEndDate >= DateTime.Now)) ? p.DiscountPercentage : 0,
+                    DiscountEndDate = p.DiscountEndDate,
                     OriginalPrice = p.ProductVariants.FirstOrDefault() != null ? p.ProductVariants.FirstOrDefault().OriginalPrice : 0,
                     CurrentPrice = (p.DiscountPercentage > 0 && (p.DiscountEndDate == null || p.DiscountEndDate >= DateTime.Now)) ? (p.ProductVariants.FirstOrDefault() != null ? p.ProductVariants.FirstOrDefault().CurrentPrice : 0) : (p.ProductVariants.FirstOrDefault() != null ? p.ProductVariants.FirstOrDefault().OriginalPrice : 0),
                     SoldQuantity = p.SoldQuantity,
-                    p.CategoryId
+                    p.CategoryId,
+                    Rating = _context.Reviews.Any(r => r.ProductId == p.ProductId) ? Math.Round(_context.Reviews.Where(r => r.ProductId == p.ProductId).Average(r => (double)r.Rating), 1) : 5.0,
+                    ReviewsCount = _context.Reviews.Count(r => r.ProductId == p.ProductId),
+                    LikesCount = _context.Favorites.Count(f => f.ProductId == p.ProductId)
                 })
                 .ToList();
 

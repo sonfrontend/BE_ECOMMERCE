@@ -1,0 +1,6 @@
+INSERT INTO ComplaintReasons (Id, Title, IsActive, IsActived, CreatedAt, UpdatedAt) VALUES (1, N'Tôi chưa nhận được hàng (mặc dù hệ thống báo đã giao)', 1, 1, '2024-01-01T00:00:00', '2024-01-01T00:00:00');
+INSERT INTO ComplaintReasons (Id, Title, IsActive, IsActived, CreatedAt, UpdatedAt) VALUES (2, N'Sản phẩm lỗi/hư hỏng nặng không thể sử dụng', 1, 1, '2024-01-01T00:00:00', '2024-01-01T00:00:00');
+INSERT INTO ComplaintReasons (Id, Title, IsActive, IsActived, CreatedAt, UpdatedAt) VALUES (3, N'Sản phẩm bị lỗi nhẹ / Thiếu linh kiện, phụ kiện', 1, 1, '2024-01-01T00:00:00', '2024-01-01T00:00:00');
+INSERT INTO ComplaintReasons (Id, Title, IsActive, IsActived, CreatedAt, UpdatedAt) VALUES (4, N'Giao sai sản phẩm / Sai màu / Sai kích cỡ', 1, 1, '2024-01-01T00:00:00', '2024-01-01T00:00:00');
+INSERT INTO ComplaintReasons (Id, Title, IsActive, IsActived, CreatedAt, UpdatedAt) VALUES (5, N'Hàng không giống mô tả / Nghi ngờ hàng giả', 1, 1, '2024-01-01T00:00:00', '2024-01-01T00:00:00');
+INSERT INTO ComplaintReasons (Id, Title, IsActive, IsActived, CreatedAt, UpdatedAt) VALUES (13, N'Lý do khác', 1, 1, '2024-01-01T00:00:00', '2024-01-01T00:00:00');

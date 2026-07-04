@@ -288,7 +288,7 @@ public class OrderController(ApplicationDbContext context, BE_ECOMMERCE.Services
                 orderItems = o.OrderItems.Select(oi => new
                 {
                     id = oi.Id,
-                    articleId = oi.ProductVariant.ProductId,
+                    productId = oi.ProductVariant.ProductId,
                     productName = oi.ProductVariant.Product.ProductName,
                     imageUrl = oi.ProductVariant.ImageUrl,
                     color = oi.ProductVariant.Color,
@@ -441,7 +441,7 @@ public class OrderController(ApplicationDbContext context, BE_ECOMMERCE.Services
                 shippingAddress = o.ShippingAddress,
                 orderItems = o.OrderItems.Select(oi => new
                 {
-                    articleId = oi.ProductVariant.ProductId,
+                    productId = oi.ProductVariant.ProductId,
                     productName = oi.ProductVariant.Product.ProductName,
                     imageUrl = oi.ProductVariant.ImageUrl,
                     color = oi.ProductVariant.Color,
@@ -497,6 +497,40 @@ public class OrderController(ApplicationDbContext context, BE_ECOMMERCE.Services
                 }
 
                 order.VoucherCode = null;
+            }
+
+            // Xử lý hoàn tiền VNPay nếu Admin hủy đơn đang chờ xác nhận và đã thanh toán
+            if (order.Status == OrderStatus.Pending && order.IsPaid && order.PaymentMethod.Equals("VNPAY", StringComparison.OrdinalIgnoreCase))
+            {
+                // Gọi VNPay Refund API
+                bool refundSuccess = await _vnPayService.RefundAsync(order, order.TotalAmount, "02", "System");
+                if (!refundSuccess)
+                {
+                    return BadRequest(new { message = "Hủy đơn thành công nhưng gặp lỗi khi hoàn tiền qua VNPay. Vui lòng liên hệ hỗ trợ." });
+                }
+
+                // Cập nhật ví giả lập Admin
+                var adminWallet = await _context.SandboxWallets.FirstOrDefaultAsync(w => w.AccountType == "ADMIN");
+                if (adminWallet != null)
+                {
+                    adminWallet.Balance -= order.TotalAmount;
+
+                    var transaction = new BE_ECOMMERCE.Entities.System.TransactionHistory
+                    {
+                        WalletId = adminWallet.Id,
+                        OrderId = order.Id,
+                        AmountChanged = -order.TotalAmount,
+                        NewBalance = adminWallet.Balance,
+                        TransactionType = "REFUND",
+                        TransactionDate = DateTime.Now,
+                        Description = $"Hoàn tiền VNPay cho đơn hàng #{order.Id} (Admin hủy)"
+                    };
+                    _context.TransactionHistories.Add(transaction);
+                }
+
+                // Đổi trạng thái yêu cầu cập nhật thành Refunded thay vì Cancelled
+                request.Status = OrderStatus.Refunded;
+                order.IsPaid = false;
             }
         }
 

@@ -4,7 +4,7 @@ namespace BE_ECOMMERCE.DTOs.Products
 {
     public class GetByIdsRequestDto
     {
-        public List<string> ArticleIds { get; set; } = new List<string>();
+        public List<string> ProductIds { get; set; } = new List<string>();
         public string SortPrice { get; set; }
     }
 }

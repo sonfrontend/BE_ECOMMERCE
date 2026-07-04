@@ -32,7 +32,7 @@ public class CartController(ApplicationDbContext context) : ControllerBase
                 quantity = c.Quantity,
                 product = new
                 {
-                    articleId = c.ProductVariant.ProductId,
+                    productId = c.ProductVariant.ProductId,
                     productName = c.ProductVariant.Product.ProductName,
                     price = (c.ProductVariant.Product.DiscountPercentage > 0 && (c.ProductVariant.Product.DiscountEndDate == null || c.ProductVariant.Product.DiscountEndDate >= DateTime.Now)) 
                         ? (c.ProductVariant.CurrentPrice > 0 ? c.ProductVariant.CurrentPrice : c.ProductVariant.OriginalPrice) 
@@ -63,7 +63,7 @@ public class CartController(ApplicationDbContext context) : ControllerBase
         }
         else
         {
-            variant = await _context.ProductVariants.FirstOrDefaultAsync(v => v.ProductId == request.ArticleId);
+            variant = await _context.ProductVariants.FirstOrDefaultAsync(v => v.ProductId == request.ProductId);
         }
         if (variant == null)
             return NotFound("Sản phẩm không tồn tại");
@@ -72,7 +72,7 @@ public class CartController(ApplicationDbContext context) : ControllerBase
         int currentQuantity = cartItem != null ? cartItem.Quantity : 0;
         
         if (currentQuantity + request.Quantity > variant.StockQuantity)
-            return BadRequest($"Sản phẩm này chỉ còn {variant.StockQuantity} cái trong kho");
+            return BadRequest("Số lượng vượt quá tồn kho");
 
         if (cartItem != null)
             cartItem.Quantity += request.Quantity;
@@ -92,7 +92,7 @@ public class CartController(ApplicationDbContext context) : ControllerBase
         _context.UserInteractions.Add(new BE_ECOMMERCE.Entities.UserInteraction
         {
             UserId = userId,
-            ProductId = request.ArticleId,
+            ProductId = request.ProductId,
             InteractionType = "CART",
             Score = 3,
             CreatedAt = DateTime.UtcNow
@@ -120,7 +120,7 @@ public class CartController(ApplicationDbContext context) : ControllerBase
             return NotFound("Không tìm thấy sản phẩm trong giỏ");
 
         if (quantity > cartItem.ProductVariant.StockQuantity)
-            return BadRequest($"Sản phẩm này chỉ còn {cartItem.ProductVariant.StockQuantity} cái trong kho");
+            return BadRequest("Số lượng vượt quá tồn kho");
 
         cartItem.Quantity = quantity;
         await _context.SaveChangesAsync();

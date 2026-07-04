@@ -1,0 +1,56 @@
+[
+    {
+        "Id": 1,
+        "Title": "Tôi chưa nhận được hàng (mặc dù hệ thống báo đã giao)",
+        "Description": "Khách hàng khiếu nại về việc không nhận được hàng. Phù hợp với cách xử lý NOT_RECEIVED của Admin.",
+        "IsActive": true,
+        "IsActived": true,
+        "CreatedAt": "2024-01-01T00:00:00",
+        "UpdatedAt": "2024-01-01T00:00:00"
+    },
+    {
+        "Id": 2,
+        "Title": "Sản phẩm lỗi/hư hỏng nặng không thể sử dụng",
+        "Description": "Sản phẩm bị hỏng hoàn toàn. Phù hợp với cách xử lý FULL_REFUND hoặc EXCHANGE.",
+        "IsActive": true,
+        "IsActived": true,
+        "CreatedAt": "2024-01-01T00:00:00",
+        "UpdatedAt": "2024-01-01T00:00:00"
+    },
+    {
+        "Id": 3,
+        "Title": "Sản phẩm bị lỗi nhẹ / Thiếu linh kiện, phụ kiện",
+        "Description": "Hàng hóa có thể dùng được nhưng không trọn vẹn. Phù hợp với cách xử lý PARTIAL_REFUND.",
+        "IsActive": true,
+        "IsActived": true,
+        "CreatedAt": "2024-01-01T00:00:00",
+        "UpdatedAt": "2024-01-01T00:00:00"
+    },
+    {
+        "Id": 4,
+        "Title": "Giao sai sản phẩm / Sai màu / Sai kích cỡ",
+        "Description": "Lỗi do người bán giao nhầm. Phù hợp với cách xử lý EXCHANGE hoặc FULL_REFUND.",
+        "IsActive": true,
+        "IsActived": true,
+        "CreatedAt": "2024-01-01T00:00:00",
+        "UpdatedAt": "2024-01-01T00:00:00"
+    },
+    {
+        "Id": 5,
+        "Title": "Hàng không giống mô tả / Nghi ngờ hàng giả",
+        "Description": "Sản phẩm không đạt chất lượng cam kết. Tùy theo bằng chứng, admin có thể FULL_REFUND hoặc REJECTED.",
+        "IsActive": true,
+        "IsActived": true,
+        "CreatedAt": "2024-01-01T00:00:00",
+        "UpdatedAt": "2024-01-01T00:00:00"
+    },
+    {
+        "Id": 13,
+        "Title": "Lý do khác",
+        "Description": "Các trường hợp đặc biệt không nằm trong danh sách. Phù hợp với cách xử lý OTHER.",
+        "IsActive": true,
+        "IsActived": true,
+        "CreatedAt": "2024-01-01T00:00:00",
+        "UpdatedAt": "2024-01-01T00:00:00"
+    }
+]

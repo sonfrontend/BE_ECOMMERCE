@@ -61,11 +61,12 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
         // Có thể cấu hình thêm các quan hệ giữa các bảng tại đây nếu cần
 
         builder.Entity<ComplaintReason>().HasData(
-            new ComplaintReason { Id = 1, Title = "Tôi chưa nhận được hàng", IsActive = true, CreatedAt = new DateTime(2024, 1, 1), UpdatedAt = new DateTime(2024, 1, 1) },
+            new ComplaintReason { Id = 1, Title = "Tôi chưa nhận được hàng (mặc dù hệ thống báo đã giao)", IsActive = true, CreatedAt = new DateTime(2024, 1, 1), UpdatedAt = new DateTime(2024, 1, 1) },
             new ComplaintReason { Id = 2, Title = "Sản phẩm lỗi/hư hỏng nặng không thể sử dụng", IsActive = true, CreatedAt = new DateTime(2024, 1, 1), UpdatedAt = new DateTime(2024, 1, 1) },
             new ComplaintReason { Id = 3, Title = "Sản phẩm bị lỗi nhẹ / Thiếu linh kiện, phụ kiện", IsActive = true, CreatedAt = new DateTime(2024, 1, 1), UpdatedAt = new DateTime(2024, 1, 1) },
             new ComplaintReason { Id = 4, Title = "Giao sai sản phẩm / Sai màu / Sai kích cỡ", IsActive = true, CreatedAt = new DateTime(2024, 1, 1), UpdatedAt = new DateTime(2024, 1, 1) },
-            new ComplaintReason { Id = 5, Title = "Hàng không giống mô tả / Nghi ngờ hàng giả / Lý do khác", IsActive = true, CreatedAt = new DateTime(2024, 1, 1), UpdatedAt = new DateTime(2024, 1, 1) }
+            new ComplaintReason { Id = 5, Title = "Hàng không giống mô tả / Nghi ngờ hàng giả", IsActive = true, CreatedAt = new DateTime(2024, 1, 1), UpdatedAt = new DateTime(2024, 1, 1) },
+            new ComplaintReason { Id = 13, Title = "Lý do khác", IsActive = true, CreatedAt = new DateTime(2024, 1, 1), UpdatedAt = new DateTime(2024, 1, 1) }
         );
 
 
